@@ -16,6 +16,7 @@ import (
 	"github.com/mesh-net-probe/probe/internal/web/auth"
 	"github.com/mesh-net-probe/probe/internal/web/websocket"
 	"github.com/mesh-net-probe/probe/internal/logger"
+	types "github.com/mesh-net-probe/probe/pkg/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,9 +30,24 @@ func main() {
 	configManager := config.NewManager()
 	
 	// Add file provider
-	_, err := config.NewFileProvider("./config", "config.json", 30*time.Second)
+	fileProvider, err := config.NewFileProvider("./config", "config.json", 30*time.Second)
 	if err != nil {
 		log.Fatalf("Failed to create file provider: %v", err)
+	}
+	
+	// Add file provider to manager with options
+	configManager = config.NewManager(config.WithProvider(fileProvider))
+	
+	// Initialize configuration manager with default config
+	defaultConfig := &types.Configuration{
+		ID:   "default",
+		Name: "Default Configuration",
+		Version: 1,
+	}
+	
+	err = configManager.Initialize(ctx, defaultConfig)
+	if err != nil {
+		log.Fatalf("Failed to initialize configuration manager: %v", err)
 	}
 	
 	// Note: etcd and consul providers would need to be implemented separately
@@ -96,11 +112,13 @@ func main() {
 	router.GET("/ws/measurements", websocketService.HandleMeasurementStreaming())
 	router.GET("/ws/health", websocketService.HandleHealthUpdates())
 
-	// Start WebSocket service
+	// Start WebSocket service in background (don't block initialization)
 	go func() {
+		logger.GetGlobalLogger().Info(ctx, "Starting WebSocket service...")
 		if err := websocketService.Start(ctx); err != nil {
 			logger.GetGlobalLogger().Error(ctx, err, "WebSocket service failed to start")
 		}
+		logger.GetGlobalLogger().Info(ctx, "WebSocket service started")
 	}()
 
 	// Get port from environment or use default
@@ -120,6 +138,7 @@ func main() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.GetGlobalLogger().Error(ctx, err, "Admin web interface failed to start")
 		}
+		logger.GetGlobalLogger().Info(ctx, "Admin web interface stopped")
 	}()
 
 	// Graceful shutdown
