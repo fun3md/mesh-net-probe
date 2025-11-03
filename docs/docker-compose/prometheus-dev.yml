@@ -1,6 +1,10 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    environment: 'development'
+    cluster: 'mesh-probe-dev'
+    replica: 'prometheus-1'
 
 scrape_configs:
   # Admin Web Server metrics
@@ -44,8 +48,3 @@ alerting:
         - targets: []
       # - alertmanager:9093
 
-# External labels for multi-environment setups
-external_labels:
-  environment: 'development'
-  cluster: 'mesh-probe-dev'
-  replica: 'prometheus-1'
