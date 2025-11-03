@@ -1,0 +1,112 @@
+{
+  "id": "test-admin-web-config",
+  "name": "Testing Admin Web Configuration",
+  "version": 1,
+  "created_at": "2025-11-03T20:01:00Z",
+  "updated_at": "2025-11-03T20:01:00Z",
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0",
+    "read_timeout": "10s",
+    "write_timeout": "10s",
+    "idle_timeout": "30s",
+    "max_header_bytes": 1048576
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "output": "stdout",
+    "enable_request_logging": true,
+    "enable_access_logging": true
+  },
+  "cors": {
+    "enabled": true,
+    "allowed_origins": [
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "http://127.0.0.1:3000",
+      "http://127.0.0.1:5173"
+    ],
+    "allowed_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allowed_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+    "exposed_headers": ["X-Total-Count"],
+    "allow_credentials": true,
+    "max_age": "300"
+  },
+  "authentication": {
+    "enabled": false,
+    "mock_auth": true,
+    "jwt_secret": "test-secret-key",
+    "token_expiry": "1h",
+    "rate_limit": {
+      "enabled": true,
+      "requests_per_minute": 1000,
+      "burst": 100
+    }
+  },
+  "monitoring": {
+    "health_check_interval": "10s",
+    "metrics_enabled": false,
+    "tracing_enabled": false,
+    "profiling_enabled": false,
+    "mock_responses": true,
+    "simulated_delays": {
+      "min_delay": "50ms",
+      "max_delay": "200ms",
+      "error_rate": 0.05
+    }
+  },
+  "features": {
+    "websocket_enabled": true,
+    "real_time_updates": true,
+    "configuration_hot_reload": true,
+    "debug_endpoints": true,
+    "mock_data": true,
+    "data_simulation": true
+  },
+  "probes": {
+    "default_timeout": "3s",
+    "max_concurrent_measurements": 50,
+    "measurement_buffer_size": 1000,
+    "retention_period": "1h",
+    "mock_measurements": true,
+    "simulation_mode": true
+  },
+  "api_rate_limits": {
+    "health_endpoint": "unlimited",
+    "config_endpoints": "unlimited", 
+    "probe_endpoints": "unlimited",
+    "measurement_endpoints": "unlimited"
+  },
+  "testing": {
+    "baseline_responses": true,
+    "performance_baseline": {
+      "health_response_time": "100ms",
+      "config_response_time": "200ms",
+      "probes_response_time": "150ms",
+      "measurements_response_time": "300ms"
+    },
+    "error_injection": {
+      "enabled": true,
+      "error_rate": 0.02,
+      "timeout_rate": 0.01,
+      "server_error_rate": 0.005
+    },
+    "load_simulation": {
+      "concurrent_users": 10,
+      "requests_per_second": 100,
+      "burst_factor": 2
+    },
+    "data_fixtures": {
+      "probe_count": 5,
+      "measurement_count": 100,
+      "config_variations": 3
+    }
+  },
+  "validation": {
+    "strict_validation": false,
+    "schema_validation": true,
+    "response_time_validation": false,
+    "data_integrity_checks": false
+  }
+}

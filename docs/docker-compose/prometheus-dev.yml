@@ -1,0 +1,51 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Admin Web Server metrics
+  - job_name: 'admin-web-dev'
+    static_configs:
+      - targets: ['admin-web-dev:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Redis monitoring
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-dev:6379']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Jaeger monitoring
+  - job_name: 'jaeger'
+    static_configs:
+      - targets: ['jaeger-dev:16686']
+    scrape_interval: 30s
+
+  # Node exporter (if added later)
+  # - job_name: 'node-exporter'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
+
+rule_files:
+  # - "alert_rules.yml"
+  # - "recording_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+      # - alertmanager:9093
+
+# External labels for multi-environment setups
+external_labels:
+  environment: 'development'
+  cluster: 'mesh-probe-dev'
+  replica: 'prometheus-1'

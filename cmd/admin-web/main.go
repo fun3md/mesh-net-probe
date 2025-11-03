@@ -9,10 +9,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mesh-net-probe/probe/internal/config"
+	"github.com/mesh-net-probe/probe/internal/monitoring"
+	"github.com/mesh-net-probe/probe/internal/web/api"
+	"github.com/mesh-net-probe/probe/internal/web/auth"
+	"github.com/mesh-net-probe/probe/internal/logger"
+
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	// Setup logging
+	logger.InitGlobalLogger(logger.InfoLevel)
+	
 	// Get port from environment or use default
 	port := os.Getenv("ADMIN_WEB_PORT")
 	if port == "" {
@@ -23,10 +32,16 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	
+	// Initialize system components
+	configManager := initConfigManager()
+	monitoringMgr := initMonitoringManager()
+	probeRegistry := initProbeRegistry()
+	authMiddleware := initAuthMiddleware()
+	
 	// Create HTTP server with router
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: createRouter(),
+		Handler: createRouter(configManager, monitoringMgr, probeRegistry, authMiddleware),
 	}
 	
 	// Start server in background
@@ -53,8 +68,29 @@ func main() {
 	log.Printf("Admin web interface shutdown complete")
 }
 
+// initialize configuration manager
+func initConfigManager() config.Manager {
+	// Create a simple manager without providers for demo purposes
+	return config.NewManager()
+}
+
+// initialize monitoring manager
+func initMonitoringManager() *monitoring.Manager {
+	return monitoring.NewManager()
+}
+
+// initialize probe registry
+func initProbeRegistry() *monitoring.ProbeRegistry {
+	return monitoring.NewProbeRegistry()
+}
+
+// initialize authentication middleware
+func initAuthMiddleware() *auth.Middleware {
+	return auth.NewMiddleware()
+}
+
 // createRouter sets up the Gin router with all routes
-func createRouter() *gin.Engine {
+func createRouter(configManager config.Manager, monitoringMgr *monitoring.Manager, probeRegistry *monitoring.ProbeRegistry, authMiddleware *auth.Middleware) *gin.Engine {
 	// Create Gin router
 	router := gin.Default()
 	
@@ -67,74 +103,31 @@ func createRouter() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "healthy",
 			"time":   time.Now().UTC(),
+			"service": "admin-web",
+			"version": "1.0.0",
 		})
 	})
 	
-	// Simple API endpoints
-	api := router.Group("/api/v1")
+	// Register all API routes
+	apiRouter := router.Group("/api/v1")
 	{
 		// Authentication routes
-		auth := api.Group("/auth")
-		{
-			auth.POST("/login", func(c *gin.Context) {
-				log.Printf("Login requested from %s", c.ClientIP())
-				c.JSON(http.StatusOK, gin.H{
-					"message": "Login endpoint - implementation pending",
-					"status":  "ok",
-				})
-			})
-		}
+		api.RegisterAuthRoutes(apiRouter, authMiddleware)
 		
-		// Configuration routes (simple, no auth)
-		config := api.Group("/config")
-		{
-			config.GET("", func(c *gin.Context) {
-				log.Printf("Config requested from %s", c.ClientIP())
-				c.JSON(http.StatusOK, gin.H{
-					"message": "Config endpoint - implementation pending",
-					"status":  "ok",
-				})
-			})
-		}
+		// Configuration routes
+		api.RegisterConfigRoutes(apiRouter, configManager, authMiddleware)
 		
-		// Probe routes (simple, no auth)
-		probes := api.Group("/probes")
-		{
-			probes.GET("", func(c *gin.Context) {
-				log.Printf("Probes requested from %s", c.ClientIP())
-				c.JSON(http.StatusOK, gin.H{
-					"probes": []string{},
-					"status": "ok",
-				})
-			})
-		}
+		// Probe routes
+		api.RegisterProbeRoutes(apiRouter, probeRegistry, configManager, authMiddleware)
 		
-		// Measurement routes (simple, no auth)
-		measurements := api.Group("/measurements")
-		{
-			measurements.GET("", func(c *gin.Context) {
-				log.Printf("Measurements requested from %s", c.ClientIP())
-				c.JSON(http.StatusOK, gin.H{
-					"measurements": []string{},
-					"status":       "ok",
-				})
-			})
-		}
+		// Measurement routes
+		api.RegisterMeasurementRoutes(apiRouter, monitoringMgr, authMiddleware)
 		
-		// Monitoring routes (simple, no auth)
-		monitoring := api.Group("/monitoring")
-		{
-			monitoring.GET("/health", func(c *gin.Context) {
-				log.Printf("Monitoring health requested from %s", c.ClientIP())
-				c.JSON(http.StatusOK, gin.H{
-					"status": "ok",
-					"health": "healthy",
-				})
-			})
-		}
+		// Monitoring routes
+		api.RegisterMonitoringRoutes(apiRouter, probeRegistry, monitoringMgr, authMiddleware)
 	}
 	
-	// WebSocket endpoints (basic implementation)
+	// WebSocket endpoints (basic implementation for future development)
 	ws := router.Group("/ws")
 	{
 		ws.GET("/test", func(c *gin.Context) {
@@ -142,6 +135,33 @@ func createRouter() *gin.Engine {
 			c.JSON(http.StatusOK, gin.H{
 				"message": "WebSocket endpoint - implementation pending",
 				"status":  "ok",
+				"endpoints": map[string]string{
+					"probe_updates": "/ws/probe-updates",
+					"measurements": "/ws/measurements",
+					"health_status": "/ws/health-status",
+				},
+			})
+		})
+		
+		// Future WebSocket implementations
+		ws.GET("/probe-updates", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Real-time probe updates - future implementation",
+				"protocol": "WebSocket",
+			})
+		})
+		
+		ws.GET("/measurements", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Real-time measurements - future implementation",
+				"protocol": "WebSocket",
+			})
+		})
+		
+		ws.GET("/health-status", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Real-time health status - future implementation",
+				"protocol": "WebSocket",
 			})
 		})
 	}

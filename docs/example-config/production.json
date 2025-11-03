@@ -1,0 +1,104 @@
+{
+  "id": "prod-admin-web-config",
+  "name": "Production Admin Web Configuration",
+  "version": 2,
+  "created_at": "2025-11-03T20:00:00Z",
+  "updated_at": "2025-11-03T20:01:00Z",
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0",
+    "read_timeout": "60s",
+    "write_timeout": "60s",
+    "idle_timeout": "300s",
+    "max_header_bytes": 1048576
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "output": "file",
+    "log_file": "/var/log/admin-web/app.log",
+    "error_log_file": "/var/log/admin-web/error.log",
+    "max_log_size": "100MB",
+    "max_log_backups": 10,
+    "enable_request_logging": false,
+    "enable_access_logging": true
+  },
+  "cors": {
+    "enabled": true,
+    "allowed_origins": [
+      "https://admin.yourdomain.com",
+      "https://dashboard.yourdomain.com"
+    ],
+    "allowed_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allowed_headers": ["Content-Type", "Authorization"],
+    "exposed_headers": ["X-Total-Count"],
+    "allow_credentials": true,
+    "max_age": "3600"
+  },
+  "authentication": {
+    "enabled": true,
+    "jwt_secret": "${JWT_SECRET}",
+    "token_expiry": "8h",
+    "refresh_token_expiry": "30d",
+    "rate_limit": {
+      "enabled": true,
+      "requests_per_minute": 60,
+      "burst": 10
+    },
+    "session_timeout": "30m",
+    "max_concurrent_sessions": 1000
+  },
+  "monitoring": {
+    "health_check_interval": "30s",
+    "metrics_enabled": true,
+    "metrics_endpoint": "/metrics",
+    "tracing_enabled": true,
+    "tracing_endpoint": "http://jaeger:14268/api/traces",
+    "profiling_enabled": false,
+    "alert_webhook": "https://alerts.yourdomain.com/webhook"
+  },
+  "features": {
+    "websocket_enabled": true,
+    "real_time_updates": true,
+    "configuration_hot_reload": false,
+    "debug_endpoints": false,
+    "maintenance_mode": false
+  },
+  "probes": {
+    "default_timeout": "10s",
+    "max_concurrent_measurements": 1000,
+    "measurement_buffer_size": 100000,
+    "retention_period": "7d",
+    "archive_enabled": true,
+    "archive_location": "/var/lib/admin-web/archives/"
+  },
+  "api_rate_limits": {
+    "health_endpoint": "10000/minute",
+    "config_endpoints": "100/minute", 
+    "probe_endpoints": "500/minute",
+    "measurement_endpoints": "2000/minute"
+  },
+  "security": {
+    "https_only": true,
+    "hsts_enabled": true,
+    "content_security_policy": "default-src 'self'",
+    "x_frame_options": "DENY",
+    "x_content_type_options": "nosniff",
+    "referrer_policy": "strict-origin-when-cross-origin"
+  },
+  "performance": {
+    "enable_compression": true,
+    "compression_level": 6,
+    "cache_control_max_age": "3600",
+    "enable_http2": true,
+    "connection_pool_size": 100,
+    "keep_alive_timeout": "60s"
+  },
+  "backup": {
+    "enabled": true,
+    "schedule": "0 2 * * *",
+    "retention_days": 30,
+    "location": "/var/backups/admin-web/",
+    "compress": true
+  }
+}

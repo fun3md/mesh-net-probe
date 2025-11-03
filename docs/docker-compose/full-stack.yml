@@ -1,0 +1,297 @@
+version: '3.8'
+
+services:
+  # Frontend Application (React/Vite)
+  frontend:
+    build:
+      context: ../../web
+      dockerfile: Dockerfile
+    image: mesh-probe:frontend-dev
+    container_name: mesh-probe-frontend
+    ports:
+      - "5173:5173"  # Vite dev server
+      - "3000:3000"  # Production build
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:8080
+      - VITE_WS_URL=ws://localhost:8081
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ../../web:/app:rw
+      - frontend-node-modules:/app/node_modules
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`localhost`) && PathPrefix(`/app`)"
+      - "traefik.http.routers.frontend.port=5173"
+      - "traefik.http.services.frontend.loadbalancer.server.port=5173"
+
+  # Backend Admin Web Server
+  admin-web:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.multi-platform
+      target: runtime-web
+    image: mesh-probe:admin-web-dev
+    container_name: mesh-probe-admin-web
+    ports:
+      - "8080:8080"
+      - "8081:8081"  # WebSocket port (future)
+    environment:
+      - ADMIN_WEB_PORT=8080
+      - ADMIN_WEB_HOST=0.0.0.0
+      - ADMIN_WEB_LOG_LEVEL=debug
+      - GIN_MODE=debug
+      - CORS_ALLOW_ORIGINS=http://localhost:5173,http://localhost:3000
+    volumes:
+      - ../../docs/example-config:/app/config:ro
+      - admin-web-logs:/app/logs
+      - admin-web-data:/app/data
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.admin-web.rule=Host(`api.localhost`)"
+      - "traefik.http.routers.admin-web.port=8080"
+      - "traefik.http.services.admin-web.loadbalancer.server.port=8080"
+
+  # Go CLI Probe Engine
+  probe-cli:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.multi-platform
+      target: runtime-cli
+    image: mesh-probe:cli-dev
+    container_name: mesh-probe-cli
+    environment:
+      - CONFIG_FILE=/app/config/development.json
+      - LOG_LEVEL=debug
+    volumes:
+      - ../../cmd/probe:/app/source:ro
+      - ../../docs/example-config:/app/config:ro
+      - probe-data:/app/data
+      - probe-logs:/app/logs
+    networks:
+      - mesh-probe-dev
+    restart: "no"  # Don't auto-restart for CLI tools
+    command: ["sleep", "infinity"]  # Keep container running for testing
+    healthcheck:
+      test: ["CMD", "sh", "-c", "ps aux | grep probe || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  # Development Redis (for sessions, caching, real-time data)
+  redis:
+    image: redis:7-alpine
+    container_name: mesh-probe-redis
+    ports:
+      - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=dev-password
+      - REDIS_MAXMEMORY=256mb
+      - REDIS_MAXMEMORY_POLICY=allkeys-lru
+    volumes:
+      - redis-data:/data
+      - ../../docs/docker-compose/redis-dev.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  # Development etcd (for configuration management)
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.5
+    container_name: mesh-probe-etcd
+    ports:
+      - "2379:2379"
+    environment:
+      - ETCD_NAME=etcd-dev
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://etcd:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://localhost:2379
+      - ETCD_INITIAL_CLUSTER=etcd-dev=http://etcd:2380
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=dev-cluster
+    volumes:
+      - etcd-data:/etcd
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:2379/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Development PostgreSQL (for persistent data)
+  postgres:
+    image: postgres:15-alpine
+    container_name: mesh-probe-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=meshprobe
+      - POSTGRES_USER=devuser
+      - POSTGRES_PASSWORD=devpassword
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../../docs/docker-compose/init-dev.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devuser -d meshprobe"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Development monitoring (Jaeger)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: mesh-probe-jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # HTTP collector
+      - "6831:6831/udp"  # UDP collector
+      - "6832:6832/udp"  # UDP collector (binary thrift)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - MEMORY_MAX_TRACES=50000
+      - SPAN_STORAGE_TYPE=memory
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:16686/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Development metrics (Prometheus)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mesh-probe-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../../docs/docker-compose/prometheus-dev.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+
+  # Development visualization (Grafana)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mesh-probe-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=localhost
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../../docs/docker-compose/grafana-dev-dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../../docs/docker-compose/grafana-dev-datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - jaeger
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx reverse proxy for production-like setup
+  nginx:
+    image: nginx:alpine
+    container_name: mesh-probe-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../../web/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../../docs/docker-compose/nginx-dev.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx-logs:/var/log/nginx
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - admin-web
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  frontend-node-modules:
+    driver: local
+  admin-web-logs:
+    driver: local
+  admin-web-data:
+    driver: local
+  probe-data:
+    driver: local
+  probe-logs:
+    driver: local
+  redis-data:
+    driver: local
+  etcd-data:
+    driver: local
+  postgres-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  nginx-logs:
+    driver: local
+
+networks:
+  mesh-probe-dev:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: mesh-probe-dev
