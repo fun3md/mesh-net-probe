@@ -215,12 +215,9 @@ func GetCapabilities(platform *types.PlatformInfo) (*types.PlatformMeta, error) 
 	}
 
 	// Architecture-specific considerations
-	switch platform.Arch {
-	case "amd64":
-		capabilities = append(capabilities, "sse2", "aes")
-	case "arm64":
-		capabilities = append(capabilities, "neon", "aes")
-	}
+	archCapabilities, archLimitations := getArchitectureSpecificCapabilities(platform.Arch)
+	capabilities = append(capabilities, archCapabilities...)
+	limitations = append(limitations, archLimitations...)
 
 	return &types.PlatformMeta{
 		OS:           platform.OS,
@@ -229,11 +226,99 @@ func GetCapabilities(platform *types.PlatformInfo) (*types.PlatformMeta, error) 
 		Capabilities: capabilities,
 		Limitations:  limitations,
 		Custom: map[string]interface{}{
-			"go_version": runtime.Version(),
-			"go_os":      runtime.GOOS,
-			"go_arch":    runtime.GOARCH,
+			"go_version":      runtime.Version(),
+			"go_os":           runtime.GOOS,
+			"go_arch":         runtime.GOARCH,
+			"cpu_features":    getCPUFeatures(platform.Arch),
+			"optimization":    getOptimizationLevel(platform.Arch),
+			"memory_model":    getMemoryModel(platform.Arch),
+			"cache_line_size": getCacheLineSize(platform.Arch),
 		},
 	}, nil
+}
+
+// getArchitectureSpecificCapabilities returns architecture-specific capabilities and limitations
+func getArchitectureSpecificCapabilities(arch string) ([]string, []string) {
+	capabilities := []string{}
+	limitations := []string{}
+
+	switch arch {
+	case "amd64":
+		capabilities = append(capabilities, "sse2", "sse4.1", "sse4.2", "avx", "avx2", "aes", "rdrand")
+		limitations = append(limitations, "variable_instruction_latency", "spectre_mitigation")
+	case "arm64":
+		capabilities = append(capabilities, "neon", "aes", "sha256", "sha1", "crc32", "atomic_ops")
+		limitations = append(limitations, "strict_alignment", "variable_cache_latency")
+	case "arm":
+		capabilities = append(capabilities, "neon")
+		limitations = append(limitations, "limited_simd", "potential_unaligned_access")
+	case "386":
+		limitations = append(limitations, "no_simd", "limited_registers")
+	}
+
+	return capabilities, limitations
+}
+
+// getCPUFeatures returns architecture-specific CPU features
+func getCPUFeatures(arch string) map[string]bool {
+	features := make(map[string]bool)
+
+	switch arch {
+	case "amd64":
+		features["sse2"] = true
+		features["sse4.1"] = true
+		features["sse4.2"] = true
+		features["avx"] = true
+		features["avx2"] = true
+		features["aes"] = true
+		features["rdrand"] = true
+	case "arm64":
+		features["neon"] = true
+		features["aes"] = true
+		features["sha256"] = true
+		features["sha1"] = true
+		features["crc32"] = true
+	}
+
+	return features
+}
+
+// getOptimizationLevel returns the recommended optimization level for the architecture
+func getOptimizationLevel(arch string) string {
+	switch arch {
+	case "amd64":
+		return "high" // Modern x86_64 processors benefit from aggressive optimization
+	case "arm64":
+		return "balanced" // ARM64 benefits from balanced optimization
+	case "arm":
+		return "conservative" // 32-bit ARM needs conservative optimization
+	default:
+		return "standard"
+	}
+}
+
+// getMemoryModel returns the memory model characteristics for the architecture
+func getMemoryModel(arch string) string {
+	switch arch {
+	case "amd64", "arm64":
+		return "weak_consistency"
+	case "arm":
+		return "strong_consistency"
+	default:
+		return "standard"
+	}
+}
+
+// getCacheLineSize returns the typical cache line size for the architecture
+func getCacheLineSize(arch string) int {
+	switch arch {
+	case "amd64", "arm64":
+		return 64 // Modern processors typically have 64-byte cache lines
+	case "arm":
+		return 32 // 32-bit ARM may have smaller cache lines
+	default:
+		return 64
+	}
 }
 
 // hasNetRawCapability checks if the current process has CAP_NET_RAW capability
@@ -332,4 +417,40 @@ func GetPlatformSpecificConfig(platform *types.PlatformInfo) map[string]interfac
 	}
 
 	return config
+}
+
+// GetArchitectureOptimizations returns architecture-specific optimization settings
+func GetArchitectureOptimizations(platform *types.PlatformInfo) map[string]interface{} {
+	opts := make(map[string]interface{})
+	
+	// Timing optimizations
+	opts["use_rdtsc"] = platform.Arch == "amd64"
+	opts["use_arm_counter"] = platform.Arch == "arm64"
+	opts["use_monotonic_clock"] = true
+	
+	// Network optimizations
+	switch platform.Arch {
+	case "amd64":
+		opts["packet_alignment"] = 64 // Use cache line alignment for better performance
+		opts["batch_size"] = 256      // Larger batches for x86_64
+		opts["vectorization"] = "avx2"
+	case "arm64":
+		opts["packet_alignment"] = 64 // ARM64 also benefits from 64-byte alignment
+		opts["batch_size"] = 128      // Slightly smaller batches for ARM
+		opts["vectorization"] = "neon"
+	case "arm":
+		opts["packet_alignment"] = 32 // 32-bit ARM with smaller cache lines
+		opts["batch_size"] = 64       // Conservative batching
+		opts["vectorization"] = "arm_neon"
+	default:
+		opts["packet_alignment"] = 64
+		opts["batch_size"] = 128
+		opts["vectorization"] = "auto"
+	}
+	
+	// Memory optimization
+	opts["cache_friendly_allocation"] = true
+	opts["prefer_local_memory"] = true
+	
+	return opts
 }
