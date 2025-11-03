@@ -1,0 +1,121 @@
+# Multi-stage Docker build for mesh probe system
+# This Dockerfile supports both CLI tools and admin web interface
+
+# Build stage for CLI tools
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder-cli
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies for cross-compilation
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build CLI application for multiple platforms
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o probe-cli-amd64 ./cmd/probe/ && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o probe-cli-arm64 ./cmd/probe/ && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o probe-cli-darwin-amd64 ./cmd/probe/ && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o probe-cli-darwin-arm64 ./cmd/probe/ && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o probe-cli-windows-amd64.exe ./cmd/probe/
+
+# Build stage for admin web interface
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder-web
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Install Node.js and npm for frontend build
+RUN apk add --no-cache nodejs npm
+
+# Build web interface (if React frontend exists)
+RUN if [ -d "web" ]; then \
+        cd web && \
+        npm install && \
+        npm run build; \
+    fi
+
+# Build admin web backend for multiple platforms
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o admin-web-amd64 ./cmd/admin-web/ && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o admin-web-arm64 ./cmd/admin-web/ && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o admin-web-darwin-amd64 ./cmd/admin-web/ && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o admin-web-darwin-arm64 ./cmd/admin-web/ && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o admin-web-windows-amd64.exe ./cmd/admin-web/
+
+# Runtime stage for CLI tools (minimal image)
+FROM --platform=$TARGETPLATFORM alpine:latest AS runtime-cli
+
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates
+
+# Create non-root user
+RUN addgroup -g 1000 probe && \
+    adduser -D -s /bin/sh -u 1000 -G probe probe
+
+# Set working directory
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder-cli /app/probe-cli-* /usr/local/bin/
+
+# Change ownership
+RUN chown probe:probe /usr/local/bin/probe-cli-*
+
+# Switch to non-root user
+USER probe
+
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/probe-cli-linux-amd64"]
+
+# Runtime stage for admin web interface
+FROM --platform=$TARGETPLATFORM alpine:latest AS runtime-web
+
+# Install ca-certificates and curl for health checks
+RUN apk --no-cache add ca-certificates curl
+
+# Create non-root user
+RUN addgroup -g 1000 probe && \
+    adduser -D -s /bin/sh -u 1000 -G probe probe
+
+# Set working directory
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder-web /app/admin-web-* /usr/local/bin/
+
+# Copy web assets if they exist
+COPY --from=builder-web /app/web/build /app/web/
+
+# Change ownership
+RUN chown -R probe:probe /app
+
+# Switch to non-root user
+USER probe
+
+# Expose ports (HTTP and WebSocket)
+EXPOSE 8080 8081
+
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/admin-web-linux-amd64"]
+
+# Default command
+CMD ["--help"]

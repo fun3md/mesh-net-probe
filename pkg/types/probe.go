@@ -59,3 +59,25 @@ type ProbeMetrics struct {
 	NetworkBytesRecv    uint64        `json:"network_bytes_recv"`     // Network bytes received
 	LastUpdate          time.Time     `json:"last_update"`            // Metrics last updated timestamp
 }
+
+// PlatformCapabilities represents platform-specific capabilities and limitations
+type PlatformCapabilities struct {
+	Platform     *PlatformInfo          `json:"platform"`      // Platform information
+	CanMeasure   bool                   `json:"can_measure"`   // Whether ICMP measurements are possible
+	MaxPrecision MeasurementPrecision   `json:"max_precision"` // Maximum timing precision achievable
+	Limitations  []string               `json:"limitations"`   // Platform limitations
+	Features     []string               `json:"features"`      // Available features
+}
+
+// PlatformStats contains runtime platform statistics
+type PlatformStats struct {
+	CPUCount        int           `json:"cpu_count"`         // Number of CPU cores
+	GoRoutines      int           `json:"go_routines"`       // Number of goroutines
+	MemoryAlloc     uint64        `json:"memory_alloc"`      // Allocated memory in bytes
+	MemorySys       uint64        `json:"memory_sys"`        // System memory in bytes
+	MemoryHeapAlloc uint64        `json:"memory_heap_alloc"` // Heap allocated memory
+	MemoryHeapSys   uint64        `json:"memory_heap_sys"`   // Heap system memory
+	GCCollections   uint32        `json:"gc_collections"`    // Number of GC collections
+	GCTime          time.Duration `json:"gc_time"`           // Time spent in GC
+	Uptime          time.Duration `json:"uptime"`            // Program uptime
+}

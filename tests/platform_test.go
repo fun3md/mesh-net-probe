@@ -26,41 +26,45 @@ func TestCrossPlatformFunctionality(t *testing.T) {
 	t.Logf("Container: %t", platformInfo.Container)
 
 	// Test platform capabilities
-	capabilities, err := platform.GetCapabilities(platformInfo)
+	capabilities, err := platform.ValidateCapabilities()
 	if err != nil {
 		t.Fatalf("Failed to get platform capabilities: %v", err)
 	}
 
 	t.Logf("=== Platform Capabilities ===")
-	t.Logf("Precision: %s", capabilities.Precision)
-	t.Logf("Capabilities: %v", capabilities.Capabilities)
+	t.Logf("Can Measure: %t", capabilities.CanMeasure)
+	t.Logf("Max Precision: %s", capabilities.MaxPrecision)
+	t.Logf("Features: %v", capabilities.Features)
 	t.Logf("Limitations: %v", capabilities.Limitations)
-	t.Logf("Custom settings: %v", capabilities.Custom)
 
-	// Test architecture optimizations
-	optimizations := platform.GetArchitectureOptimizations(platformInfo)
-	if optimizations != nil {
-		t.Logf("=== Architecture Optimizations ===")
-		for key, value := range optimizations {
-			t.Logf("%s: %v", key, value)
-		}
-	}
-
-	// Test platform-specific configuration
-	config := platform.GetPlatformSpecificConfig(platformInfo)
-	if config != nil {
-		t.Logf("=== Platform-Specific Configuration ===")
-		for key, value := range config {
-			t.Logf("%s: %v", key, value)
-		}
-	}
-
-	// Test compatibility validation
-	err = platform.ValidatePlatformCompatibility(platformInfo)
+	// Test optimal timing precision
+	precision, err := platform.GetOptimalTimingPrecision()
 	if err != nil {
-		t.Errorf("Platform validation failed: %v", err)
+		t.Errorf("Error getting timing precision: %v", err)
 	} else {
-		t.Logf("✅ Platform validation passed")
+		t.Logf("=== Timing Precision ===")
+		t.Logf("Optimal Precision: %s", precision)
+	}
+
+	// Test privilege requirements
+	needsPrivs, missingCaps, err := platform.CheckPrivilegeRequirements()
+	if err != nil {
+		t.Errorf("Error checking privileges: %v", err)
+	} else {
+		t.Logf("=== Privilege Check ===")
+		t.Logf("Needs Privileges: %t", needsPrivs)
+		t.Logf("Missing Capabilities: %v", missingCaps)
+	}
+
+	// Test platform statistics
+	stats, err := platform.GetPlatformStats()
+	if err != nil {
+		t.Errorf("Error getting platform stats: %v", err)
+	} else {
+		t.Logf("=== Platform Statistics ===")
+		t.Logf("CPU Count: %d", stats.CPUCount)
+		t.Logf("Memory Allocated: %d bytes", stats.MemoryAlloc)
+		t.Logf("Go Routines: %d", stats.GoRoutines)
 	}
 
 	t.Logf("=== Cross-Platform Test Complete ===")
@@ -84,45 +88,50 @@ func RunCrossPlatformDemo() {
 	fmt.Printf("Container: %t\n\n", platformInfo.Container)
 
 	// Test platform capabilities
-	capabilities, err := platform.GetCapabilities(platformInfo)
+	capabilities, err := platform.ValidateCapabilities()
 	if err != nil {
 		log.Fatalf("Failed to get platform capabilities: %v", err)
 	}
 
 	fmt.Printf("=== Platform Capabilities ===\n")
-	fmt.Printf("Precision: %s\n", capabilities.Precision)
-	fmt.Printf("Capabilities: %v\n", capabilities.Capabilities)
+	fmt.Printf("Can Measure: %t\n", capabilities.CanMeasure)
+	fmt.Printf("Max Precision: %s\n", capabilities.MaxPrecision)
+	fmt.Printf("Features: %v\n", capabilities.Features)
 	fmt.Printf("Limitations: %v\n", capabilities.Limitations)
-	fmt.Printf("Custom settings: %v\n\n", capabilities.Custom)
+	fmt.Printf("Platform: %v\n\n", capabilities.Platform)
 
-	// Test architecture optimizations
-	optimizations := platform.GetArchitectureOptimizations(platformInfo)
-	if optimizations != nil {
-		fmt.Printf("=== Architecture Optimizations ===\n")
-		for key, value := range optimizations {
-			fmt.Printf("%s: %v\n", key, value)
-		}
-		fmt.Println()
-	}
-
-	// Test platform-specific configuration
-	config := platform.GetPlatformSpecificConfig(platformInfo)
-	if config != nil {
-		fmt.Printf("=== Platform-Specific Configuration ===\n")
-		for key, value := range config {
-			fmt.Printf("%s: %v\n", key, value)
-		}
-		fmt.Println()
-	}
-
-	// Test compatibility validation
-	err = platform.ValidatePlatformCompatibility(platformInfo)
+	// Test optimal timing precision
+	precision, err := platform.GetOptimalTimingPrecision()
 	if err != nil {
-		fmt.Printf("=== Platform Compatibility ===\n")
-		fmt.Printf("❌ Validation failed: %v\n\n", err)
+		fmt.Printf("=== Timing Precision ===\n")
+		fmt.Printf("Error getting precision: %v\n", err)
 	} else {
-		fmt.Printf("=== Platform Compatibility ===\n")
-		fmt.Printf("✅ Platform validation passed\n\n")
+		fmt.Printf("=== Timing Precision ===\n")
+		fmt.Printf("Optimal Precision: %s\n\n", precision)
+	}
+
+	// Test privilege requirements
+	needsPrivs, missingCaps, err := platform.CheckPrivilegeRequirements()
+	if err != nil {
+		fmt.Printf("=== Privilege Check ===\n")
+		fmt.Printf("Error checking privileges: %v\n", err)
+	} else {
+		fmt.Printf("=== Privilege Check ===\n")
+		fmt.Printf("Needs Privileges: %t\n", needsPrivs)
+		fmt.Printf("Missing Capabilities: %v\n\n", missingCaps)
+	}
+
+	// Test platform statistics
+	stats, err := platform.GetPlatformStats()
+	if err != nil {
+		fmt.Printf("=== Platform Statistics ===\n")
+		fmt.Printf("Error getting stats: %v\n\n", err)
+	} else {
+		fmt.Printf("=== Platform Statistics ===\n")
+		fmt.Printf("CPU Count: %d\n", stats.CPUCount)
+		fmt.Printf("Memory Allocated: %d bytes\n", stats.MemoryAlloc)
+		fmt.Printf("Go Routines: %d\n", stats.GoRoutines)
+		fmt.Printf("Uptime: %v\n\n", stats.Uptime)
 	}
 
 	fmt.Printf("=== Cross-Platform Demo Complete ===\n")

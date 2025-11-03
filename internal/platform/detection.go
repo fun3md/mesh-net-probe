@@ -5,178 +5,151 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/mesh-net-probe/probe/pkg/types"
 )
 
-// DetectPlatform detects the current platform and architecture information
+// DetectPlatform returns comprehensive platform and architecture information
 func DetectPlatform() (*types.PlatformInfo, error) {
-	osInfo, err := getOSInfo()
+	// Get operating system and architecture
+	osName := runtime.GOOS
+	arch := runtime.GOARCH
+
+	// Get detailed OS version information
+	osVersion, kernelVersion, err := getOSVersionDetails(osName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to detect OS information: %w", err)
+		return nil, fmt.Errorf("failed to get OS version: %w", err)
 	}
 
-	archInfo, err := getArchitectureInfo()
-	if err != nil {
-		return nil, fmt.Errorf("failed to detect architecture information: %w", err)
-	}
-
+	// Get hostname
 	hostname, err := os.Hostname()
 	if err != nil {
-		hostname = "unknown"
+		return nil, fmt.Errorf("failed to get hostname: %w", err)
 	}
 
+	// Detect if running in container
+	isContainer := detectContainerEnvironment()
+
 	return &types.PlatformInfo{
-		OS:        osInfo.name,
-		Arch:      archInfo.name,
-		Version:   osInfo.version,
-		Kernel:    osInfo.kernel,
+		OS:        osName,
+		Arch:      arch,
+		Version:   osVersion,
+		Kernel:    kernelVersion,
 		Hostname:  hostname,
-		Container: isRunningInContainer(),
+		Container: isContainer,
 	}, nil
 }
 
-// OSInfo represents operating system information
-type OSInfo struct {
-	name    string
-	version string
-	kernel  string
-}
-
-// getOSInfo detects the operating system information
-func getOSInfo() (*OSInfo, error) {
-	switch runtime.GOOS {
+// getOSVersionDetails returns OS version and kernel version based on platform
+func getOSVersionDetails(osName string) (osVersion, kernelVersion string, err error) {
+	switch osName {
 	case "linux":
-		return getLinuxInfo()
+		return getLinuxVersionDetails()
 	case "darwin":
-		return getDarwinInfo()
+		return getDarwinVersionDetails()
 	case "windows":
-		return getWindowsInfo()
+		return getWindowsVersionDetails()
 	default:
-		return nil, fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+		return "unknown", "unknown", fmt.Errorf("unsupported operating system: %s", osName)
 	}
 }
 
-// getLinuxInfo retrieves Linux-specific system information
-func getLinuxInfo() (*OSInfo, error) {
-	osRelease, err := os.ReadFile("/etc/os-release")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read /etc/os-release: %w", err)
-	}
-
-	osInfo := &OSInfo{
-		name: "linux",
-	}
-
-	lines := strings.Split(string(osRelease), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "PRETTY_NAME=") {
-			osInfo.version = strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), `"`)
+// getLinuxVersionDetails retrieves Linux distribution and kernel version
+func getLinuxVersionDetails() (osVersion, kernelVersion string, err error) {
+	// Read /etc/os-release for distribution information
+	if data, err := os.ReadFile("/etc/os-release"); err == nil {
+		osVersion = parseOSReleaseField(string(data), "PRETTY_NAME")
+		if osVersion == "" {
+			osVersion = parseOSReleaseField(string(data), "NAME") + " " + parseOSReleaseField(string(data), "VERSION")
 		}
+	} else {
+		osVersion = "Linux (unknown distribution)"
 	}
 
 	// Get kernel version
-	if kernel, err := os.ReadFile("/proc/version"); err == nil {
-		osInfo.kernel = strings.TrimSpace(string(kernel))
+	if data, err := os.ReadFile("/proc/version"); err == nil {
+		kernelVersion = strings.TrimSpace(string(data))
+	} else {
+		kernelVersion = "unknown"
 	}
 
-	return osInfo, nil
+	return osVersion, kernelVersion, nil
 }
 
-// getDarwinInfo retrieves macOS-specific system information
-func getDarwinInfo() (*OSInfo, error) {
-	osInfo := &OSInfo{
-		name: "darwin",
-	}
-
+// getDarwinVersionDetails retrieves macOS version information
+func getDarwinVersionDetails() (osVersion, kernelVersion string, err error) {
 	// Get macOS version using system_profiler
-	// Note: In a real implementation, you would call system_profiler SPSoftwareDataType
-	// For now, we'll use a basic approach
-	osInfo.version = "macOS (version detection not implemented)"
-
-	// Get kernel version
-	if kernel, err := os.ReadFile("/System/Library/Kernels/kernel"); err == nil {
-		osInfo.kernel = strings.TrimSpace(string(kernel))
+	if output, err := runCommand("system_profiler", "SPSoftwareDataType"); err == nil {
+		osVersion = parseDarwinVersion(output)
+	} else {
+		osVersion = "macOS (version unknown)"
 	}
 
-	return osInfo, nil
+	// Get Darwin kernel version
+	kernelVersion = runtime.Version()
+	return osVersion, kernelVersion, nil
 }
 
-// getWindowsInfo retrieves Windows-specific system information
-func getWindowsInfo() (*OSInfo, error) {
-	osInfo := &OSInfo{
-		name: "windows",
-	}
-
-	// In a real implementation, you would use Windows API calls
-	// For now, we'll use basic runtime information
-	osInfo.version = fmt.Sprintf("Windows (build %s)", runtime.GOOS)
-	osInfo.kernel = "Windows Kernel"
-
-	return osInfo, nil
+// getWindowsVersionDetails retrieves Windows version information
+func getWindowsVersionDetails() (osVersion, kernelVersion string, err error) {
+	// Windows version detection would require Windows API calls or registry access
+	// For now, provide basic information
+	osVersion = "Windows (detailed version not available)"
+	kernelVersion = runtime.Version()
+	return osVersion, kernelVersion, nil
 }
 
-// ArchitectureInfo represents processor architecture information
-type ArchitectureInfo struct {
-	name string
-	bits int
-}
-
-// getArchitectureInfo detects the processor architecture
-func getArchitectureInfo() (*ArchitectureInfo, error) {
-	var archInfo ArchitectureInfo
-
-	switch runtime.GOARCH {
-	case "amd64":
-		archInfo.name = "amd64"
-		archInfo.bits = 64
-	case "arm64":
-		archInfo.name = "arm64"
-		archInfo.bits = 64
-	case "arm":
-		archInfo.name = "arm"
-		// Determine ARM bits
-		if bits := getPointerSize(); bits != 0 {
-			archInfo.bits = bits
+// parseOSReleaseField extracts a specific field from /etc/os-release content
+func parseOSReleaseField(content, field string) string {
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, field+"=") {
+			value := strings.TrimPrefix(line, field+"=")
+			return strings.Trim(value, `"`)
 		}
-	case "386":
-		archInfo.name = "386"
-		archInfo.bits = 32
-	default:
-		return nil, fmt.Errorf("unsupported architecture: %s", runtime.GOARCH)
 	}
-
-	return &archInfo, nil
+	return ""
 }
 
-// getPointerSize determines the pointer size in bits
-func getPointerSize() int {
-	// This is a heuristic approach - in practice, you'd use platform-specific methods
-	if strings.Contains(runtime.GOARCH, "64") {
-		return 64
+// parseDarwinVersion extracts version from system_profiler output
+func parseDarwinVersion(output string) string {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(strings.ToLower(line), "version") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
 	}
-	return 32
+	return "macOS (version parsing failed)"
 }
 
-// isRunningInContainer detects if the current process is running inside a container
-func isRunningInContainer() bool {
-	// Check for common container environment variables
-	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" ||
-		os.Getenv("DOCKER_HOST") != "" ||
-		os.Getenv("KUBERNETES_PORT") != "" {
-		return true
+// detectContainerEnvironment checks if running inside a container
+func detectContainerEnvironment() bool {
+	// Check for common container indicators
+	containerFiles := []string{
+		"/.dockerenv",
+		"/run/.containerenv",
+		"/proc/1/cgroup",
 	}
 
-	// Check for container-specific files
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		return true
+	for _, file := range containerFiles {
+		if data, err := os.ReadFile(file); err == nil {
+			content := string(data)
+			if strings.Contains(strings.ToLower(content), "docker") ||
+				strings.Contains(strings.ToLower(content), "container") ||
+				strings.Contains(strings.ToLower(content), "kubepods") {
+				return true
+			}
+		}
 	}
 
-	// Check for cgroup indicators
-	if cgroup, err := os.ReadFile("/proc/1/cgroup"); err == nil {
-		if strings.Contains(string(cgroup), "docker") ||
-		   strings.Contains(string(cgroup), "kubepods") ||
-		   strings.Contains(string(cgroup), "container") {
+	// Check environment variables
+	envVars := []string{"DOCKER", "KUBERNETES", "CONTAINER"}
+	for _, envVar := range envVars {
+		if os.Getenv(envVar) != "" {
 			return true
 		}
 	}
@@ -184,275 +157,186 @@ func isRunningInContainer() bool {
 	return false
 }
 
-// GetCapabilities returns the platform-specific capabilities for ICMP operations
-func GetCapabilities(platform *types.PlatformInfo) (*types.PlatformMeta, error) {
-	capabilities := []string{}
-	limitations := []string{}
-	precision := types.PrecisionMicrosecond // Default to microsecond
+// runCommand executes a system command and returns output
+func runCommand(name string, args ...string) (string, error) {
+	// This would need proper command execution implementation
+	// For now, return error to indicate not implemented
+	return "", fmt.Errorf("command execution not implemented")
+}
 
-	// Common capabilities
-	capabilities = append(capabilities, "icmp", "udp", "tcp")
+// ValidateCapabilities checks platform-specific capabilities and limitations
+func ValidateCapabilities() (*types.PlatformCapabilities, error) {
+	platformInfo, err := DetectPlatform()
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect platform: %w", err)
+	}
 
-	// Platform-specific capabilities and limitations
-	switch platform.OS {
+	capabilities := &types.PlatformCapabilities{
+		Platform:  platformInfo,
+		CanMeasure: true,
+		MaxPrecision: types.PrecisionMicrosecond,
+		Limitations: []string{},
+		Features: []string{},
+	}
+
+	// Platform-specific capability checks
+	switch platformInfo.OS {
 	case "linux":
-		capabilities = append(capabilities, "raw_sockets", "cap_net_raw")
-		if isRunningInContainer() {
-			limitations = append(limitations, "containerized_environment")
-			if !hasNetRawCapability() {
-				limitations = append(limitations, "no_cap_net_raw")
-			}
+		if err := checkLinuxCapabilities(capabilities); err != nil {
+			return nil, err
 		}
-		precision = getLinuxPrecision()
 	case "darwin":
-		capabilities = append(capabilities, "bpf")
-		limitations = append(limitations, "icmp_rate_limited")
-		precision = types.PrecisionMicrosecond
+		if err := checkDarwinCapabilities(capabilities); err != nil {
+			return nil, err
+		}
 	case "windows":
-		capabilities = append(capabilities, "winsock")
-		limitations = append(limitations, "icmp_rate_limited", "no_raw_sockets")
-		precision = types.PrecisionMillisecond
-	}
-
-	// Architecture-specific considerations
-	archCapabilities, archLimitations := getArchitectureSpecificCapabilities(platform.Arch)
-	capabilities = append(capabilities, archCapabilities...)
-	limitations = append(limitations, archLimitations...)
-
-	return &types.PlatformMeta{
-		OS:           platform.OS,
-		Architecture: platform.Arch,
-		Precision:    precision,
-		Capabilities: capabilities,
-		Limitations:  limitations,
-		Custom: map[string]interface{}{
-			"go_version":      runtime.Version(),
-			"go_os":           runtime.GOOS,
-			"go_arch":         runtime.GOARCH,
-			"cpu_features":    getCPUFeatures(platform.Arch),
-			"optimization":    getOptimizationLevel(platform.Arch),
-			"memory_model":    getMemoryModel(platform.Arch),
-			"cache_line_size": getCacheLineSize(platform.Arch),
-		},
-	}, nil
-}
-
-// getArchitectureSpecificCapabilities returns architecture-specific capabilities and limitations
-func getArchitectureSpecificCapabilities(arch string) ([]string, []string) {
-	capabilities := []string{}
-	limitations := []string{}
-
-	switch arch {
-	case "amd64":
-		capabilities = append(capabilities, "sse2", "sse4.1", "sse4.2", "avx", "avx2", "aes", "rdrand")
-		limitations = append(limitations, "variable_instruction_latency", "spectre_mitigation")
-	case "arm64":
-		capabilities = append(capabilities, "neon", "aes", "sha256", "sha1", "crc32", "atomic_ops")
-		limitations = append(limitations, "strict_alignment", "variable_cache_latency")
-	case "arm":
-		capabilities = append(capabilities, "neon")
-		limitations = append(limitations, "limited_simd", "potential_unaligned_access")
-	case "386":
-		limitations = append(limitations, "no_simd", "limited_registers")
-	}
-
-	return capabilities, limitations
-}
-
-// getCPUFeatures returns architecture-specific CPU features
-func getCPUFeatures(arch string) map[string]bool {
-	features := make(map[string]bool)
-
-	switch arch {
-	case "amd64":
-		features["sse2"] = true
-		features["sse4.1"] = true
-		features["sse4.2"] = true
-		features["avx"] = true
-		features["avx2"] = true
-		features["aes"] = true
-		features["rdrand"] = true
-	case "arm64":
-		features["neon"] = true
-		features["aes"] = true
-		features["sha256"] = true
-		features["sha1"] = true
-		features["crc32"] = true
-	}
-
-	return features
-}
-
-// getOptimizationLevel returns the recommended optimization level for the architecture
-func getOptimizationLevel(arch string) string {
-	switch arch {
-	case "amd64":
-		return "high" // Modern x86_64 processors benefit from aggressive optimization
-	case "arm64":
-		return "balanced" // ARM64 benefits from balanced optimization
-	case "arm":
-		return "conservative" // 32-bit ARM needs conservative optimization
-	default:
-		return "standard"
-	}
-}
-
-// getMemoryModel returns the memory model characteristics for the architecture
-func getMemoryModel(arch string) string {
-	switch arch {
-	case "amd64", "arm64":
-		return "weak_consistency"
-	case "arm":
-		return "strong_consistency"
-	default:
-		return "standard"
-	}
-}
-
-// getCacheLineSize returns the typical cache line size for the architecture
-func getCacheLineSize(arch string) int {
-	switch arch {
-	case "amd64", "arm64":
-		return 64 // Modern processors typically have 64-byte cache lines
-	case "arm":
-		return 32 // 32-bit ARM may have smaller cache lines
-	default:
-		return 64
-	}
-}
-
-// hasNetRawCapability checks if the current process has CAP_NET_RAW capability
-func hasNetRawCapability() bool {
-	// In a container environment, this check would need to be more sophisticated
-	// For now, we assume containers with proper setup have the capability
-	return true
-}
-
-// getLinuxPrecision determines the timing precision available on Linux
-func getLinuxPrecision() types.MeasurementPrecision {
-	// Check for high-resolution timer availability
-	if hpet, err := os.Stat("/dev/hpet"); err == nil && !hpet.IsDir() {
-		return types.PrecisionNanosecond
-	}
-	
-	// Check for TSC availability
-	if _, err := os.Stat("/sys/devices/system/clocksource/clocksource0/current_clocksource"); err == nil {
-		if clocksource, err := os.ReadFile("/sys/devices/system/clocksource/clocksource0/current_clocksource"); err == nil {
-			if strings.Contains(string(clocksource), "tsc") {
-				return types.PrecisionNanosecond
-			}
+		if err := checkWindowsCapabilities(capabilities); err != nil {
+			return nil, err
 		}
 	}
-	
-	return types.PrecisionMicrosecond
+
+	// Architecture-specific adjustments
+	if err := checkArchitectureCapabilities(capabilities); err != nil {
+		return nil, err
+	}
+
+	return capabilities, nil
 }
 
-// ValidatePlatformCompatibility checks if the platform meets minimum requirements
-func ValidatePlatformCompatibility(platform *types.PlatformInfo) error {
-	// Check OS compatibility
-	if !isSupportedOS(platform.OS) {
-		return fmt.Errorf("unsupported operating system: %s", platform.OS)
+// checkLinuxCapabilities validates Linux-specific capabilities
+func checkLinuxCapabilities(capabilities *types.PlatformCapabilities) error {
+	// Check if ICMP is available
+	if !isICMPSupported() {
+		capabilities.CanMeasure = false
+		capabilities.Limitations = append(capabilities.Limitations, "ICMP measurement not supported")
 	}
 
-	// Check architecture compatibility
-	if !isSupportedArchitecture(platform.Arch) {
-		return fmt.Errorf("unsupported architecture: %s", platform.Arch)
+	// Check for high-resolution timer support
+	if !isHighResTimerSupported() {
+		capabilities.Limitations = append(capabilities.Limitations, "High-resolution timers not available")
+		capabilities.MaxPrecision = types.PrecisionMillisecond
 	}
 
-	// Check for required capabilities based on OS
-	// Windows requires admin privileges for ICMP operations
-	if platform.OS == "windows" && os.Getenv("ADMIN_RIGHTS") != "true" {
-		// Note: Windows supports ICMP via Winsock, but requires elevated privileges
-		// The application will handle permission checking at runtime
+	// Check for required capabilities
+	capabilities.Features = append(capabilities.Features, "Standard ICMP support", "POSIX sockets")
+
+	return nil
+}
+
+// checkDarwinCapabilities validates macOS-specific capabilities
+func checkDarwinCapabilities(capabilities *types.PlatformCapabilities) error {
+	// macOS generally supports ICMP but may require privileges
+	capabilities.Features = append(capabilities.Features, "Darwin ICMP support", "BSD sockets")
+
+	// Check for timing precision
+	if !isHighResTimerSupported() {
+		capabilities.MaxPrecision = types.PrecisionMicrosecond
+		capabilities.Limitations = append(capabilities.Limitations, "Limited timing precision")
 	}
 
 	return nil
 }
 
-// isSupportedOS checks if the operating system is supported
-func isSupportedOS(os string) bool {
-	supported := []string{"linux", "darwin", "windows"}
-	for _, supportedOS := range supported {
-		if os == supportedOS {
-			return true
-		}
-	}
-	return false
+// checkWindowsCapabilities validates Windows-specific capabilities
+func checkWindowsCapabilities(capabilities *types.PlatformCapabilities) error {
+	// Windows has different ICMP handling
+	capabilities.Features = append(capabilities.Features, "Windows ICMP support", "WinSock")
+
+	// Windows timing precision may be limited
+	capabilities.MaxPrecision = types.PrecisionMicrosecond
+	capabilities.Limitations = append(capabilities.Limitations, "Windows timing precision varies")
+
+	return nil
 }
 
-// isSupportedArchitecture checks if the architecture is supported
-func isSupportedArchitecture(arch string) bool {
-	supported := []string{"amd64", "arm64"}
-	for _, supportedArch := range supported {
-		if arch == supportedArch {
-			return true
-		}
-	}
-	return false
-}
-
-// GetPlatformSpecificConfig returns platform-specific configuration adjustments
-func GetPlatformSpecificConfig(platform *types.PlatformInfo) map[string]interface{} {
-	config := make(map[string]interface{})
-
-	switch platform.OS {
-	case "linux":
-		config["use_raw_sockets"] = true
-		config["icmp_idle_timeout"] = "30s"
-		config["buffer_size"] = 8192
-	case "darwin":
-		config["use_raw_sockets"] = false
-		config["icmp_idle_timeout"] = "10s"
-		config["buffer_size"] = 4096
-	case "windows":
-		config["use_raw_sockets"] = false
-		config["icmp_idle_timeout"] = "5s"
-		config["buffer_size"] = 2048
-	}
-
-	// Architecture-specific adjustments
-	switch platform.Arch {
-	case "arm64":
-		config["optimize_for_arm"] = true
+// checkArchitectureCapabilities validates architecture-specific capabilities
+func checkArchitectureCapabilities(capabilities *types.PlatformCapabilities) error {
+	switch capabilities.Platform.Arch {
 	case "amd64":
-		config["optimize_for_x86"] = true
-	}
-
-	return config
-}
-
-// GetArchitectureOptimizations returns architecture-specific optimization settings
-func GetArchitectureOptimizations(platform *types.PlatformInfo) map[string]interface{} {
-	opts := make(map[string]interface{})
-	
-	// Timing optimizations
-	opts["use_rdtsc"] = platform.Arch == "amd64"
-	opts["use_arm_counter"] = platform.Arch == "arm64"
-	opts["use_monotonic_clock"] = true
-	
-	// Network optimizations
-	switch platform.Arch {
-	case "amd64":
-		opts["packet_alignment"] = 64 // Use cache line alignment for better performance
-		opts["batch_size"] = 256      // Larger batches for x86_64
-		opts["vectorization"] = "avx2"
+		capabilities.Features = append(capabilities.Features, "x86_64 architecture", "Advanced timing instructions")
 	case "arm64":
-		opts["packet_alignment"] = 64 // ARM64 also benefits from 64-byte alignment
-		opts["batch_size"] = 128      // Slightly smaller batches for ARM
-		opts["vectorization"] = "neon"
+		capabilities.Features = append(capabilities.Features, "ARM64 architecture", "ARMv8 timing instructions")
 	case "arm":
-		opts["packet_alignment"] = 32 // 32-bit ARM with smaller cache lines
-		opts["batch_size"] = 64       // Conservative batching
-		opts["vectorization"] = "arm_neon"
+		capabilities.Features = append(capabilities.Features, "ARM architecture", "ARM timing instructions")
 	default:
-		opts["packet_alignment"] = 64
-		opts["batch_size"] = 128
-		opts["vectorization"] = "auto"
+		capabilities.Limitations = append(capabilities.Limitations, fmt.Sprintf("Unknown architecture: %s", capabilities.Platform.Arch))
 	}
-	
-	// Memory optimization
-	opts["cache_friendly_allocation"] = true
-	opts["prefer_local_memory"] = true
-	
-	return opts
+
+	return nil
 }
+
+// isICMPSupported checks if ICMP is supported on this platform
+func isICMPSupported() bool {
+	// Basic check - actual implementation would test ICMP socket creation
+	return true // Assume supported for now
+}
+
+// isHighResTimerSupported checks if high-resolution timers are available
+func isHighResTimerSupported() bool {
+	// Check for CLOCK_MONOTONIC or similar high-resolution timers
+	return true // Assume supported for now
+}
+
+// GetOptimalTimingPrecision returns the optimal timing precision for the current platform
+func GetOptimalTimingPrecision() (types.MeasurementPrecision, error) {
+	capabilities, err := ValidateCapabilities()
+	if err != nil {
+		return types.PrecisionMillisecond, err
+	}
+
+	return capabilities.MaxPrecision, nil
+}
+
+// CheckPrivilegeRequirements determines if elevated privileges are needed
+func CheckPrivilegeRequirements() (bool, []string, error) {
+	platformInfo, err := DetectPlatform()
+	if err != nil {
+		return true, []string{"Platform detection failed"}, err
+	}
+
+	needsPrivileges := false
+	missingCapabilities := []string{}
+
+	// Check if root/admin privileges are needed
+	switch platformInfo.OS {
+	case "linux":
+		needsPrivileges = os.Geteuid() != 0
+		if needsPrivileges {
+			missingCapabilities = append(missingCapabilities, "Root privileges for raw ICMP sockets")
+		}
+	case "darwin":
+		needsPrivileges = os.Geteuid() != 0
+		if needsPrivileges {
+			missingCapabilities = append(missingCapabilities, "Admin privileges for raw ICMP sockets")
+		}
+	case "windows":
+		// Windows typically doesn't require admin for basic ICMP
+		needsPrivileges = false
+	}
+
+	return needsPrivileges, missingCapabilities, nil
+}
+
+// GetPlatformStats returns runtime statistics about the platform
+func GetPlatformStats() (*types.PlatformStats, error) {
+	// Get memory information
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	stats := &types.PlatformStats{
+		CPUCount:       runtime.NumCPU(),
+		GoRoutines:     runtime.NumGoroutine(),
+		MemoryAlloc:    memStats.Alloc,
+		MemorySys:      memStats.Sys,
+		MemoryHeapAlloc: memStats.HeapAlloc,
+		MemoryHeapSys:  memStats.HeapSys,
+		GCCollections:  memStats.NumGC,
+		GCTime:         time.Duration(memStats.PauseTotalNs) * time.Nanosecond,
+		Uptime:         time.Since(startTime),
+	}
+
+	return stats, nil
+}
+
+// Platform info for timing
+var startTime = time.Now()

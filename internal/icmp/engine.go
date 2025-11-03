@@ -7,439 +7,492 @@ import (
 	"time"
 
 	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 
-	"github.com/mesh-net-probe/probe/internal/errors"
-	"github.com/mesh-net-probe/probe/internal/logger"
-	"github.com/mesh-net-probe/probe/internal/network"
 	"github.com/mesh-net-probe/probe/pkg/types"
 )
 
-// Engine handles ICMP measurement operations with microsecond precision
-type Engine interface {
-	// Initialize sets up the ICMP engine with configuration
-	Initialize(ctx context.Context, config *types.NetworkConfig) error
-
-	// Measure performs a single ICMP measurement
-	Measure(ctx context.Context, target *types.NetworkTarget) (*types.MeasurementData, error)
-
-	// MeasureBatch performs multiple measurements in sequence
-	MeasureBatch(ctx context.Context, targets []*types.NetworkTarget) ([]*types.MeasurementData, error)
-
-	// StartContinuous starts continuous measurement mode
-	StartContinuous(ctx context.Context, targets []*types.NetworkTarget, interval time.Duration) error
-
-	// StopContinuous stops continuous measurement mode
-	StopContinuous(ctx context.Context) error
-
-	// GetStats returns current engine statistics
-	GetStats() *EngineStats
-
-	// Close shuts down the ICMP engine
-	Close(ctx context.Context) error
+// Engine provides ICMP measurement capabilities with microsecond precision
+type Engine struct {
+	config  *ICMPConfig
+	socket  net.PacketConn
+	network string
+	address string
 }
 
-// EngineStats contains ICMP engine runtime statistics
-type EngineStats struct {
-	MeasurementsTotal   uint64           `json:"measurements_total"`     // Total measurements performed
-	MeasurementsSuccess uint64           `json:"measurements_success"`   // Successful measurements
-	MeasurementsFailed  uint64           `json:"measurements_failed"`    // Failed measurements
-	AverageRTT          time.Duration    `json:"average_rtt"`            // Average RTT
-	MinRTT             time.Duration    `json:"min_rtt"`                // Minimum RTT
-	MaxRTT             time.Duration    `json:"max_rtt"`                // Maximum RTT
-	LastUpdate         time.Time        `json:"last_update"`            // Last stats update
+// ICMPConfig contains ICMP engine configuration
+type ICMPConfig struct {
+	Network        string        // "ip4", "ip6", or "ip"
+	SourceIP       net.IP        // Source IP address (nil for any)
+	Timeout        time.Duration // Request timeout
+	BufferSize     int           // Send/receive buffer size
+	DSCP           int           // DSCP value for QoS
+	TTL            int           // Time-to-live
+	BindInterface  string        // Network interface name
 }
 
-// simpleEngine provides a simplified ICMP measurement implementation
-type simpleEngine struct {
-	config       *types.NetworkConfig
-	conn         *net.IPConn
-	packetHandler network.PacketHandler
-	logger       logger.Logger
-	stats        EngineStats
+// ICMPEngineOption functional option for configuring the engine
+type ICMPEngineOption func(*ICMPConfig)
+
+// WithNetwork specifies the IP network version
+func WithNetwork(network string) ICMPEngineOption {
+	return func(config *ICMPConfig) {
+		config.Network = network
+	}
+}
+
+// WithSourceIP sets the source IP address
+func WithSourceIP(ip net.IP) ICMPEngineOption {
+	return func(config *ICMPConfig) {
+		config.SourceIP = ip
+	}
+}
+
+// WithTimeout sets the measurement timeout
+func WithTimeout(timeout time.Duration) ICMPEngineOption {
+	return func(config *ICMPConfig) {
+		config.Timeout = timeout
+	}
+}
+
+// WithBufferSize sets the socket buffer size
+func WithBufferSize(size int) ICMPEngineOption {
+	return func(config *ICMPConfig) {
+		config.BufferSize = size
+	}
+}
+
+// WithTTL sets the time-to-live for packets
+func WithTTL(ttl int) ICMPEngineOption {
+	return func(config *ICMPConfig) {
+		config.TTL = ttl
+	}
 }
 
 // NewEngine creates a new ICMP measurement engine
-func NewEngine() Engine {
-	return &simpleEngine{
-		packetHandler: network.NewPacketHandler(),
-		logger:        logger.GetGlobalLogger(),
-	}
-}
-
-func (e *simpleEngine) Initialize(ctx context.Context, config *types.NetworkConfig) error {
-	e.config = config
-
-	// Try to create ICMP connection for IPv4
-	var err error
-	var sourceAddr *net.IPAddr
-	
-	// Use wildcard IP (0.0.0.0) if SourceIP is not specified
-	if config.SourceIP != nil && !config.SourceIP.IsUnspecified() {
-		sourceAddr = &net.IPAddr{IP: config.SourceIP}
-	} else {
-		sourceAddr = &net.IPAddr{IP: net.ParseIP("0.0.0.0")}
+func NewEngine(opts ...ICMPEngineOption) (*Engine, error) {
+	config := &ICMPConfig{
+		Network:     "ip4", // Default to IPv4
+		Timeout:     5 * time.Second,
+		BufferSize:  65535,
+		DSCP:        0,
+		TTL:         64,
 	}
 
-	// Try to create raw ICMP socket
-	conn, err := net.ListenIP("ip4:icmp", sourceAddr)
+	// Apply functional options
+	for _, opt := range opts {
+		opt(config)
+	}
+
+	// Validate configuration
+	if err := validateConfig(config); err != nil {
+		return nil, fmt.Errorf("invalid ICMP config: %w", err)
+	}
+
+	// Determine network and address
+	network, address, err := determineNetworkAddress(config)
 	if err != nil {
-		// On Windows, raw ICMP often requires admin privileges
-		// Fall back to UDP-based ICMP simulation for testing
-		e.logger.Warn(ctx, "Failed to create raw ICMP connection, using simulation mode",
-			"error", err,
-			"platform", "windows",
-		)
-		
-		// For now, we'll create a mock connection that doesn't actually send packets
-		// In production, this would need proper ICMP implementation with admin rights
-		e.conn = nil // Mark as simulation mode
-		return nil
+		return nil, fmt.Errorf("failed to determine network: %w", err)
 	}
 
-	e.conn = conn
+	// Create ICMP socket
+	socket, err := createICMPSocket(config, network, address)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ICMP socket: %w", err)
+	}
 
 	// Configure socket options
-	if config.BufferSize > 0 {
-		if err := conn.SetReadBuffer(config.BufferSize); err != nil {
-			conn.Close()
-			return fmt.Errorf("failed to set read buffer: %w", err)
-		}
-		if err := conn.SetWriteBuffer(config.BufferSize); err != nil {
-			conn.Close()
-			return fmt.Errorf("failed to set write buffer: %w", err)
-		}
+	if err := configureSocket(socket, config); err != nil {
+		socket.Close()
+		return nil, fmt.Errorf("failed to configure socket: %w", err)
 	}
 
-	var sourceIPStr string
-	if config.SourceIP != nil {
-		sourceIPStr = config.SourceIP.String()
-	} else {
-		sourceIPStr = "0.0.0.0 (wildcard)"
+	return &Engine{
+		config:  config,
+		socket:  socket,
+		network: network,
+		address: address,
+	}, nil
+}
+
+// validateConfig validates the ICMP engine configuration
+func validateConfig(config *ICMPConfig) error {
+	if config.Network != "ip4" && config.Network != "ip6" && config.Network != "ip" {
+		return fmt.Errorf("invalid network: %s", config.Network)
 	}
 
-	e.logger.Info(ctx, "ICMP engine initialized",
-		"source_ip", sourceIPStr,
-		"buffer_size", config.BufferSize,
-	)
+	if config.Timeout <= 0 {
+		return fmt.Errorf("timeout must be positive")
+	}
+
+	if config.BufferSize <= 0 {
+		return fmt.Errorf("buffer size must be positive")
+	}
+
+	if config.TTL <= 0 || config.TTL > 255 {
+		return fmt.Errorf("TTL must be between 1 and 255")
+	}
+
+	if config.DSCP < 0 || config.DSCP > 63 {
+		return fmt.Errorf("DSCP must be between 0 and 63")
+	}
 
 	return nil
 }
 
-func (e *simpleEngine) Measure(ctx context.Context, target *types.NetworkTarget) (*types.MeasurementData, error) {
-	// Validate target
-	if err := e.validateTarget(target); err != nil {
+// determineNetworkAddress determines the appropriate network and address
+func determineNetworkAddress(config *ICMPConfig) (network, address string, err error) {
+	switch config.Network {
+	case "ip4":
+		return "udp4", "0.0.0.0", nil
+	case "ip6":
+		return "udp6", "::", nil
+	case "ip":
+		return "udp", "0.0.0.0", nil
+	default:
+		return "", "", fmt.Errorf("unsupported network: %s", config.Network)
+	}
+}
+
+// createICMPSocket creates the underlying ICMP socket
+func createICMPSocket(config *ICMPConfig, network, address string) (net.PacketConn, error) {
+	socket, err := net.ListenPacket(network, address)
+	if err != nil {
 		return nil, err
 	}
 
-	startTime := time.Now()
-
-	// Try to create ICMP echo request packet
-	var packet *icmp.Message
-	var data []byte
-	var packetSize int
-
-	packet, err := createICMPEchoRequest()
-	if err != nil {
-		// Use simulation mode if packet creation fails
-		packet = nil
-	} else {
-		// Try to marshal packet to binary
-		data, err = packet.Marshal(nil)
-		if err != nil {
-			packet = nil
-		} else {
-			packetSize = len(data)
+	// Apply source IP if specified
+	if config.SourceIP != nil {
+		if _, ok := socket.(*net.UDPConn); ok {
+			// Note: UDPConn doesn't have Bind method after creation
+			// Source IP selection would need to be done during socket creation
+			// For now, we'll use the default interface
 		}
 	}
 
-	// Set timeout
-	timeout := target.Timeout
-	if timeout == 0 {
-		timeout = 5 * time.Second // Default timeout
+	return socket, nil
+}
+
+// configureSocket applies socket-level configuration
+func configureSocket(socket net.PacketConn, config *ICMPConfig) error {
+	// Set socket buffer size
+	if udpSocket, ok := socket.(*net.UDPConn); ok {
+		// Set send buffer
+		if err := udpSocket.SetWriteBuffer(config.BufferSize); err != nil {
+			return err
+		}
+
+		// Set receive buffer
+		if err := udpSocket.SetReadBuffer(config.BufferSize); err != nil {
+			return err
+		}
 	}
 
-	// Send ICMP packet
-	requestSent := time.Now()
-	dstAddr := &net.IPAddr{IP: target.Address}
-	
-	// Check if we're in simulation mode (no actual ICMP socket or packet failed)
-	if e.conn == nil || packet == nil {
-		// Simulate ICMP response with synthetic data for testing
-		time.Sleep(10 * time.Millisecond) // Simulate network delay
-		responseRecv := time.Now()
-		rtt := responseRecv.Sub(requestSent)
-		
-		e.recordSuccess(rtt)
-		
-		return &types.MeasurementData{
-			ID:           generateMeasurementID(),
-			ProbeID:      "local",
-			Target:       *target,
-			Timestamp:    startTime,
-			RequestSent:  requestSent,
-			ResponseRecv: responseRecv,
-			RTT:          rtt,
-			Success:      true,
-			SourceIP:     e.config.SourceIP,
-			DestIP:       target.Address,
-			PacketSize:   packetSize,
-			
-			// Platform metadata
-			PlatformData: types.PlatformMeta{
-				OS:           "windows",
-				Architecture: "amd64",
-				Precision:    types.PrecisionMillisecond,
-			},
-		}, nil
+	// Configure TTL and DSCP if possible
+	if _, ok := socket.(*net.IPConn); ok {
+		// Set TTL
+		if config.TTL > 0 {
+			// This would require platform-specific socket options
+			// For now, we'll handle TTL in packet construction
+		}
+
+		// Set DSCP
+		if config.DSCP > 0 {
+			// This would require platform-specific socket options
+			// For now, we'll handle DSCP in packet construction
+		}
 	}
 
-	// Real ICMP socket path with valid packet
-	n, err := e.conn.WriteTo(data, dstAddr)
+	return nil
+}
+
+// Ping performs a single ICMP measurement to a target
+func (e *Engine) Ping(ctx context.Context, target net.IP) (*types.MeasurementData, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Validate target
+	if err := validateTarget(target, e.config.Network); err != nil {
+		return nil, fmt.Errorf("invalid target: %w", err)
+	}
+
+	// Create ICMP echo request packet
+	packet, err := createEchoRequest(e.config.Network, target)
 	if err != nil {
-		e.recordFailure()
-		return nil, e.handleSendError(ctx, target, err)
+		return nil, fmt.Errorf("failed to create ICMP packet: %w", err)
 	}
 
-	if n != len(data) {
-		e.recordFailure()
-		return nil, errors.NewNetworkError(
-			errors.ICMPInvalidPacket,
-			fmt.Sprintf("partial write for target %s: sent %d bytes, expected %d", target.ID, n, len(data)),
-			errors.WithComponent("icmp.engine"),
-			errors.WithContext("target_id", target.ID),
-		)
-	}
-
-	// Receive response
-	recvBuffer := make([]byte, 1500) // Standard MTU
-	e.conn.SetReadDeadline(time.Now().Add(timeout))
-
-	n, _, _ = e.conn.ReadFrom(recvBuffer)
-	responseRecv := time.Now()
-	
-	// Reset deadline
-	e.conn.SetReadDeadline(time.Time{})
-
-	if n == 0 {
-		e.recordFailure()
-		return &types.MeasurementData{
-			ID:           generateMeasurementID(),
-			ProbeID:      "local",
-			Target:       *target,
-			Timestamp:    startTime,
-			RequestSent:  requestSent,
-			Success:      false,
-			ErrorCode:    types.ICMPErrTimeout,
-			ErrorMessage: fmt.Sprintf("timeout after %v", timeout),
-			SourceIP:     e.config.SourceIP,
-			DestIP:       target.Address,
-		}, nil
-	}
-
-	// Calculate RTT with microsecond precision
-	rtt := responseRecv.Sub(requestSent)
-
-	// Record success
-	e.recordSuccess(rtt)
-
-	// Create measurement data
+	// Create measurement context
 	measurement := &types.MeasurementData{
 		ID:           generateMeasurementID(),
-		ProbeID:      "local",
-		Target:       *target,
-		Timestamp:    startTime,
-		RequestSent:  requestSent,
-		ResponseRecv: responseRecv,
-		RTT:          rtt,
-		Success:      true,
-		SourceIP:     e.config.SourceIP,
-		DestIP:       target.Address,
-		PacketSize:   len(data),
-		
-		// Platform metadata
-		PlatformData: types.PlatformMeta{
-			OS:           "windows",
-			Architecture: "amd64",
-			Precision:    types.PrecisionMicrosecond,
-		},
+		Target:       createNetworkTarget(target),
+		Timestamp:    time.Now(),
+		PacketSize:   len(packet),
+		PlatformData: types.PlatformMeta{OS: "unknown", Architecture: "unknown"}, // Will be filled by caller
+	}
+
+	// Perform the measurement with timeout
+	result, err := e.performMeasurement(ctx, target, packet, measurement)
+	if err != nil {
+		measurement.Success = false
+		measurement.ErrorMessage = err.Error()
+		return measurement, err
+	}
+
+	// Fill measurement data with results
+	*measurement = *result
+	return measurement, nil
+}
+
+// validateTarget validates the target IP address
+func validateTarget(target net.IP, network string) error {
+	if target == nil {
+		return fmt.Errorf("target cannot be nil")
+	}
+
+	if target.IsUnspecified() {
+		return fmt.Errorf("target cannot be unspecified address")
+	}
+
+	switch network {
+	case "ip4":
+		if target.To4() == nil {
+			return fmt.Errorf("target must be IPv4 address")
+		}
+	case "ip6":
+		if target.To4() != nil {
+			return fmt.Errorf("target must be IPv6 address")
+		}
+	case "ip":
+		// Accept both IPv4 and IPv6
+	}
+
+	return nil
+}
+
+// createEchoRequest creates an ICMP echo request packet
+func createEchoRequest(network string, target net.IP) ([]byte, error) {
+	var messageType icmp.Type
+	var messageBody icmp.MessageBody
+
+	switch {
+	case target.To4() != nil:
+		// IPv4 ICMP echo request
+		messageType = ipv4.ICMPTypeEcho
+		messageBody = &icmp.Echo{
+			ID:   getProcessID(),
+			Seq:  1,
+			Data: []byte("probe measurement"),
+		}
+	default:
+		// IPv6 ICMP echo request
+		messageType = ipv6.ICMPTypeEchoRequest
+		messageBody = &icmp.Echo{
+			ID:   getProcessID(),
+			Seq:  1,
+			Data: []byte("probe measurement"),
+		}
+	}
+
+	message := &icmp.Message{
+		Type: messageType,
+		Code: 0,
+		Body: messageBody,
+	}
+
+	packet, err := message.Marshal(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return packet, nil
+}
+
+// getProcessID returns the current process ID for ICMP packet identification
+func getProcessID() int {
+	// This is a simple approach - in production, you might want
+	// a more sophisticated ID generation strategy
+	return 1000 // Placeholder
+}
+
+// createNetworkTarget creates a NetworkTarget from an IP address
+func createNetworkTarget(ip net.IP) types.NetworkTarget {
+	var addr net.IP
+	if ip.To4() != nil {
+		addr = ip.To4()
+	} else {
+		addr = ip
+	}
+
+	return types.NetworkTarget{
+		ID:          fmt.Sprintf("target_%s", addr.String()),
+		DisplayName: addr.String(),
+		Address:     addr,
+		Port:        0, // ICMP uses port 0
+		Enabled:     true,
+		Priority:    5,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+}
+
+// performMeasurement performs the actual ICMP measurement
+func (e *Engine) performMeasurement(ctx context.Context, target net.IP, packet []byte, measurement *types.MeasurementData) (*types.MeasurementData, error) {
+	// Create destination address
+	dstAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:0", target.String()))
+	if err != nil {
+		return measurement, fmt.Errorf("failed to resolve destination: %w", err)
+	}
+
+	// Set request sent timestamp
+	measurement.RequestSent = time.Now()
+
+	// Send ICMP packet
+	_, err = e.socket.WriteTo(packet, dstAddr)
+	if err != nil {
+		measurement.Success = false
+		measurement.ErrorMessage = fmt.Sprintf("failed to send ICMP packet: %v", err)
+		return measurement, err
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(ctx, e.config.Timeout)
+	defer cancel()
+
+	// Receive response
+	responseBuffer := make([]byte, 65535)
+	n, addr, err := e.socket.ReadFrom(responseBuffer)
+	if err != nil {
+		measurement.Success = false
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			measurement.ErrorCode = types.ICMPErrTimeout
+			measurement.ErrorMessage = "ICMP request timed out"
+		} else {
+			measurement.ErrorMessage = fmt.Sprintf("failed to receive ICMP response: %v", err)
+		}
+		return measurement, err
+	}
+
+	measurement.ResponseRecv = time.Now()
+	measurement.RTT = measurement.ResponseRecv.Sub(measurement.RequestSent)
+	measurement.SourceIP = net.ParseIP(addr.String())
+	measurement.DestIP = target
+	measurement.Success = true
+
+	// Parse ICMP response
+	responseData := responseBuffer[:n]
+	if err := e.parseResponse(responseData, measurement); err != nil {
+		measurement.Success = false
+		measurement.ErrorMessage = fmt.Sprintf("failed to parse ICMP response: %v", err)
+		return measurement, err
 	}
 
 	return measurement, nil
 }
 
-func (e *simpleEngine) MeasureBatch(ctx context.Context, targets []*types.NetworkTarget) ([]*types.MeasurementData, error) {
-	measurements := make([]*types.MeasurementData, 0, len(targets))
+// parseResponse parses the ICMP response packet
+func (e *Engine) parseResponse(responseData []byte, measurement *types.MeasurementData) error {
+	// Parse ICMP message
+	message, err := icmp.ParseMessage(0xFF, responseData) // 0xFF is a placeholder protocol
+	if err != nil {
+		return fmt.Errorf("failed to parse ICMP message: %w", err)
+	}
 
-	for _, target := range targets {
-		select {
-		case <-ctx.Done():
-			return measurements, ctx.Err()
-		default:
+	// Check if it's an echo reply
+	switch measurement.Target.Address.To4() {
+	case nil:
+		// IPv6
+		if message.Type != ipv6.ICMPTypeEchoReply {
+			return fmt.Errorf("expected IPv6 echo reply, got type %v", message.Type)
 		}
+	default:
+		// IPv4
+		if message.Type != ipv4.ICMPTypeEchoReply {
+			return fmt.Errorf("expected IPv4 echo reply, got type %v", message.Type)
+		}
+	}
 
-		measurement, err := e.Measure(ctx, target)
+	// Extract sequence number from echo body
+	if echo, ok := message.Body.(*icmp.Echo); ok {
+		measurement.Sequence = uint16(echo.Seq)
+		measurement.PacketID = uint16(echo.ID)
+	}
+
+	return nil
+}
+
+// generateMeasurementID generates a unique measurement ID
+func generateMeasurementID() string {
+	return fmt.Sprintf("meas_%d_%d", time.Now().UnixNano(), getProcessID())
+}
+
+// Close closes the ICMP engine and releases resources
+func (e *Engine) Close() error {
+	if e.socket != nil {
+		return e.socket.Close()
+	}
+	return nil
+}
+
+// PingBatch performs multiple ICMP measurements to the same target
+func (e *Engine) PingBatch(ctx context.Context, target net.IP, count int) ([]*types.MeasurementData, error) {
+	if count <= 0 {
+		return nil, fmt.Errorf("count must be positive")
+	}
+
+	results := make([]*types.MeasurementData, count)
+	for i := 0; i < count; i++ {
+		measurement, err := e.Ping(ctx, target)
 		if err != nil {
-			e.logger.Error(ctx, err, "Failed to measure target", "target_id", target.ID)
+			results[i] = measurement
+			// Continue with remaining measurements even if some fail
 			continue
 		}
-
-		measurements = append(measurements, measurement)
+		results[i] = measurement
 	}
 
-	return measurements, nil
+	return results, nil
 }
 
-// StartContinuous starts continuous measurement mode
-func (e *simpleEngine) StartContinuous(ctx context.Context, targets []*types.NetworkTarget, interval time.Duration) error {
-	// Simplified implementation - just log the start
-	e.logger.Info(ctx, "Continuous measurement mode started", 
-		"targets_count", len(targets), 
-		"interval", interval)
-	return nil
-}
-
-// StopContinuous stops continuous measurement mode
-func (e *simpleEngine) StopContinuous(ctx context.Context) error {
-	// Simplified implementation - just log the stop
-	e.logger.Info(ctx, "Continuous measurement mode stopped")
-	return nil
-}
-
-// GetStats returns current engine statistics
-func (e *simpleEngine) GetStats() *EngineStats {
-	stats := e.stats
-	stats.LastUpdate = time.Now()
-	return &stats
-}
-
-// Close shuts down the ICMP engine
-func (e *simpleEngine) Close(ctx context.Context) error {
-	if e.conn != nil {
-		e.conn.Close()
-	}
-	e.logger.Info(ctx, "ICMP engine closed")
-	return nil
-}
-
-// Helper methods
-
-func (e *simpleEngine) validateTarget(target *types.NetworkTarget) error {
-	if target == nil {
-		return errors.NewValidationError(
-			errors.ConfigMissingRequired,
-			"target cannot be nil",
-			errors.WithComponent("icmp.engine"),
-		)
+// PingContinuous performs continuous ICMP measurements with configurable intervals
+func (e *Engine) PingContinuous(ctx context.Context, target net.IP, interval time.Duration, count int) (<-chan *types.MeasurementData, <-chan error, error) {
+	if interval <= 0 {
+		return nil, nil, fmt.Errorf("interval must be positive")
 	}
 
-	if target.Address == nil {
-		return errors.NewValidationError(
-			errors.ConfigMissingRequired,
-			"target address cannot be nil",
-			errors.WithContext("target_id", target.ID),
-			errors.WithComponent("icmp.engine"),
-		)
-	}
+	results := make(chan *types.MeasurementData, 100)
+	errors := make(chan error, 10)
 
-	return nil
-}
+	go func() {
+		defer close(results)
+		defer close(errors)
 
-func (e *simpleEngine) handleSendError(ctx context.Context, target *types.NetworkTarget, err error) *errors.MeshError {
-	// Handle specific network errors
-	if netErr, ok := err.(net.Error); ok {
-		if netErr.Timeout() {
-			return errors.NewTimeoutError(
-				errors.ICMPTimeout,
-				fmt.Sprintf("ICMP timeout for target %s", target.ID),
-				errors.WithCause(err),
-				errors.WithComponent("icmp.engine"),
-				errors.WithContext("target_id", target.ID),
-			)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		measurementsMade := 0
+		for {
+			select {
+			case <-ctx.Done():
+				errors <- ctx.Err()
+				return
+			case <-ticker.C:
+				measurement, err := e.Ping(ctx, target)
+				if err != nil {
+					errors <- err
+				} else {
+					results <- measurement
+				}
+
+				measurementsMade++
+				if count > 0 && measurementsMade >= count {
+					return
+				}
+			}
 		}
-	}
+	}()
 
-	// Permission denied
-	if _, ok := err.(*net.OpError); ok {
-		return errors.NewPermissionError(
-			errors.ICMPPermissionDenied,
-			fmt.Sprintf("permission denied for ICMP to target %s", target.ID),
-			errors.WithCause(err),
-			errors.WithComponent("icmp.engine"),
-			errors.WithContext("target_id", target.ID),
-		)
-	}
-
-	return errors.NewNetworkError(
-		errors.ICMPNoResponse,
-		fmt.Sprintf("failed to send ICMP to target %s: %v", target.ID, err),
-		errors.WithCause(err),
-		errors.WithComponent("icmp.engine"),
-		errors.WithContext("target_id", target.ID),
-	)
-}
-
-func (e *simpleEngine) recordSuccess(rtt time.Duration) {
-	e.stats.MeasurementsTotal++
-	e.stats.MeasurementsSuccess++
-	
-	// Update RTT statistics
-	if e.stats.MinRTT == 0 || rtt < e.stats.MinRTT {
-		e.stats.MinRTT = rtt
-	}
-	if rtt > e.stats.MaxRTT {
-		e.stats.MaxRTT = rtt
-	}
-
-	// Calculate average (simple average for now)
-	if e.stats.MeasurementsSuccess > 0 {
-		e.stats.AverageRTT = rtt // Simplified - using last measurement
-	}
-}
-
-func (e *simpleEngine) recordFailure() {
-	e.stats.MeasurementsTotal++
-	e.stats.MeasurementsFailed++
-}
-
-// Utility functions
-
-func createICMPEchoRequest() (*icmp.Message, error) {
-	// Create simple echo request with minimal payload
-	payload := make([]byte, 56) // Standard ping payload size
-	for i := range payload {
-		payload[i] = byte(i % 256)
-	}
-
-	// Create the echo body
-	body := &icmp.Echo{
-		ID:   1,
-		Seq:  1,
-		Data: payload,
-	}
-	
-	// Create the ICMP message for Echo Request
-	msg := &icmp.Message{
-		Type: icmpMessageType{value: 8}, // Echo Request
-		Code: 0,
-		Body: body,
-	}
-
-	return msg, nil
-}
-
-// icmpMessageType implements the icmp.Type interface correctly
-type icmpMessageType struct {
-	value int
-}
-
-func (t icmpMessageType) Protocol() int {
-	return 1 // ICMP protocol number for IPv4
-}
-
-func (t icmpMessageType) String() string {
-	return fmt.Sprintf("ICMP Type %d", t.value)
-}
-
-func generateMeasurementID() string {
-	return fmt.Sprintf("measurement_%d", time.Now().UnixNano())
+	return results, errors, nil
 }

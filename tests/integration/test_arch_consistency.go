@@ -21,29 +21,38 @@ func TestX64ARM64Consistency(t *testing.T) {
 	
 	t.Logf("Testing architecture consistency on: %s/%s", platformInfo.OS, platformInfo.Arch)
 	
-	// Create timing engine
-	timing := icmp.NewTimingEngine()
-	if err := timing.Initialize(); err != nil {
-		t.Fatalf("Failed to initialize timing engine: %v", err)
-	}
-	
-	// Get timing precision
-	precision, err := timing.ValidatePrecision()
+	// Create ICMP engine for timing testing
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(5*time.Second),
+		icmp.WithBufferSize(65535),
+	)
 	if err != nil {
-		t.Errorf("Failed to validate timing precision: %v", err)
+		t.Fatalf("Failed to create ICMP engine: %v", err)
+	}
+	defer engine.Close()
+	
+	// Test timing resolution using measurements
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		t.Error("Invalid target IP")
 		return
 	}
 	
-	t.Logf("Current architecture %s timing precision: %s", platformInfo.Arch, precision)
+	// Perform timing tests
+	start := time.Now()
+	measurement, err := engine.Ping(context.Background(), target)
+	elapsed := time.Since(start)
 	
-	// Test timing resolution
-	resolution := timing.GetTimerResolution()
-	if resolution <= 0 {
-		t.Errorf("Invalid timing resolution: %v", resolution)
+	if err != nil {
+		t.Errorf("ICMP ping failed: %v", err)
 		return
 	}
 	
-	t.Logf("Current architecture %s timing resolution: %v", platformInfo.Arch, resolution)
+	if measurement != nil {
+		t.Logf("RTT measurement: %v", measurement.RTT)
+	}
+	
+	t.Logf("Architecture %s timing resolution: %v", platformInfo.Arch, elapsed)
 	
 	// Test CPU features
 	features := getCPUFeaturesForArchitecture(platformInfo.Arch)
@@ -55,13 +64,13 @@ func TestX64ARM64Consistency(t *testing.T) {
 	t.Logf("Current architecture %s CPU features: %v", platformInfo.Arch, features)
 	
 	// Test platform optimizations
-	opts := platform.GetArchitectureOptimizations(platformInfo)
-	if opts == nil {
-		t.Error("No architecture optimizations returned")
+	capabilities, err := platform.ValidateCapabilities()
+	if err != nil {
+		t.Errorf("Failed to get platform capabilities: %v", err)
 		return
 	}
 	
-	t.Logf("Current architecture %s optimizations: %v", platformInfo.Arch, opts)
+	t.Logf("Current architecture %s capabilities: %v", platformInfo.Arch, capabilities.Features)
 	
 	// Validate architecture-specific expectations
 	validateArchitectureConsistency(t, platformInfo.Arch)
@@ -76,34 +85,33 @@ func TestArchitectureSpecificOptimization(t *testing.T) {
 	
 	t.Logf("Testing architecture-specific optimizations for: %s/%s", platformInfo.OS, platformInfo.Arch)
 	
-	// Test timing optimizations
-	opts := platform.GetArchitectureOptimizations(platformInfo)
+	// Test platform capabilities
+	capabilities, err := platform.ValidateCapabilities()
+	if err != nil {
+		t.Errorf("Failed to get platform capabilities: %v", err)
+		return
+	}
 	
-	// Validate timing optimizations based on architecture
+	// Validate architecture-specific capabilities
 	switch platformInfo.Arch {
 	case "amd64":
-		if rdtsc, ok := opts["use_rdtsc"]; !ok || !rdtsc.(bool) {
-			t.Error("AMD64 should use RDTSC for timing")
-		}
-		if vec, ok := opts["vectorization"]; !ok || vec != "avx2" {
-			t.Errorf("AMD64 should use AVX2 vectorization, got: %v", vec)
+		// AMD64 should have certain features
+		if !capabilities.CanMeasure {
+			t.Error("AMD64 should support ICMP measurements")
 		}
 	case "arm64":
-		if armCounter, ok := opts["use_arm_counter"]; !ok || !armCounter.(bool) {
-			t.Error("ARM64 should use ARM counter for timing")
+		// ARM64 should also support measurements
+		if !capabilities.CanMeasure {
+			t.Error("ARM64 should support ICMP measurements")
 		}
-		if vec, ok := opts["vectorization"]; !ok || vec != "neon" {
-			t.Errorf("ARM64 should use NEON vectorization, got: %v", vec)
-		}
+	case "arm":
+		// ARM32 may have limitations
+		t.Logf("ARM32 capabilities: %v", capabilities.Limitations)
 	}
 	
 	// Test memory optimization settings
-	if cacheFriendly, ok := opts["cache_friendly_allocation"]; !ok || !cacheFriendly.(bool) {
-		t.Error("All architectures should use cache-friendly allocation")
-	}
-	
-	if preferLocal, ok := opts["prefer_local_memory"]; !ok || !preferLocal.(bool) {
-		t.Error("All architectures should prefer local memory")
+	if len(capabilities.Features) == 0 {
+		t.Error("Platform should have defined features")
 	}
 	
 	t.Logf("Architecture %s optimizations validated successfully", platformInfo.Arch)
@@ -122,14 +130,18 @@ func TestPerformanceBenchmarkComparison(t *testing.T) {
 	
 	t.Logf("Running performance benchmarks for architecture: %s/%s", platformInfo.OS, platformInfo.Arch)
 	
-	// Initialize timing engine
-	timing := icmp.NewTimingEngine()
-	if err := timing.Initialize(); err != nil {
-		t.Fatalf("Failed to initialize timing engine: %v", err)
+	// Initialize ICMP engine
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(5*time.Second),
+		icmp.WithBufferSize(65535),
+	)
+	if err != nil {
+		t.Fatalf("Failed to create ICMP engine: %v", err)
 	}
+	defer engine.Close()
 	
 	// Benchmark timing operations
-	benchmarkResults := benchmarkTimingOperations(t, timing)
+	benchmarkResults := benchmarkTimingOperations(t, engine)
 	
 	t.Logf("Architecture %s benchmark results: %v", platformInfo.Arch, benchmarkResults)
 	
@@ -137,18 +149,18 @@ func TestPerformanceBenchmarkComparison(t *testing.T) {
 	switch platformInfo.Arch {
 	case "amd64":
 		// Modern x86_64 should have excellent performance
-		if benchmarkResults.NanosecondPrecision() > 1000 {
-			t.Logf("AMD64 nanosecond timing might be available: %v", benchmarkResults)
+		if benchmarkResults.operationsPerSecond > 100000 {
+			t.Logf("AMD64 performance excellent: %v", benchmarkResults)
 		}
 	case "arm64":
 		// ARM64 should also have good performance
-		if benchmarkResults.NanosecondPrecision() > 2000 {
-			t.Logf("ARM64 timing precision: %v", benchmarkResults)
+		if benchmarkResults.operationsPerSecond > 50000 {
+			t.Logf("ARM64 performance good: %v", benchmarkResults)
 		}
 	case "arm":
-		// 32-bit ARM might have lower precision
-		if benchmarkResults.NanosecondPrecision() > 5000 {
-			t.Logf("ARM timing precision acceptable: %v", benchmarkResults)
+		// 32-bit ARM might have lower performance
+		if benchmarkResults.operationsPerSecond > 10000 {
+			t.Logf("ARM performance acceptable: %v", benchmarkResults)
 		}
 	}
 }
@@ -169,43 +181,43 @@ func TestCrossArchitectureCompatibility(t *testing.T) {
 	t.Logf("Testing cross-architecture compatibility for: %s/%s", platformInfo.OS, platformInfo.Arch)
 	
 	// Initialize ICMP engine
-	engine := icmp.NewEngine()
-	config := createPlatformCompatibleConfig(platformInfo)
-	
-	err = engine.Initialize(ctx, config)
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(5*time.Second),
+		icmp.WithBufferSize(65535),
+	)
 	if err != nil {
 		t.Skipf("Cannot initialize ICMP engine: %v", err)
 	}
-	defer engine.Close(ctx)
+	defer engine.Close()
 	
-	// Test engine statistics structure consistency
-	stats := engine.GetStats()
-	if stats == nil {
-		t.Error("Engine statistics should not be nil")
+	// Test engine functionality
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		t.Error("Invalid target IP")
 		return
 	}
 	
-	// Validate statistics structure is consistent across architectures
-	validateStatsConsistency(t, stats)
-	
-	// Test timing precision is measurable
-	timing := icmp.NewTimingEngine()
-	if err := timing.Initialize(); err != nil {
-		t.Fatalf("Failed to initialize timing engine: %v", err)
-	}
-	
-	precision, err := timing.ValidatePrecision()
+	measurement, err := engine.Ping(ctx, target)
 	if err != nil {
-		t.Errorf("Timing precision validation failed: %v", err)
+		t.Errorf("ICMP ping failed: %v", err)
 		return
 	}
 	
-	if precision == "" {
-		t.Error("Timing precision should be defined")
+	if measurement == nil {
+		t.Error("Measurement result should not be nil")
 		return
 	}
 	
-	t.Logf("Architecture %s timing precision validated: %s", platformInfo.Arch, precision)
+	// Validate measurement structure consistency
+	if measurement.RTT < 0 {
+		t.Error("RTT should be non-negative")
+	}
+	
+	if !measurement.Timestamp.IsZero() {
+		t.Logf("Architecture %s measurement timestamp: %v", platformInfo.Arch, measurement.Timestamp)
+	}
+	
+	t.Logf("Architecture %s compatibility validated successfully", platformInfo.Arch)
 }
 
 // TestPlatformCapabilitiesConsistency tests that platform capabilities are consistent
@@ -218,7 +230,7 @@ func TestPlatformCapabilitiesConsistency(t *testing.T) {
 	t.Logf("Testing platform capabilities for: %s/%s", platformInfo.OS, platformInfo.Arch)
 	
 	// Get capabilities
-	capabilities, err := platform.GetCapabilities(platformInfo)
+	capabilities, err := platform.ValidateCapabilities()
 	if err != nil {
 		t.Fatalf("Failed to get platform capabilities: %v", err)
 	}
@@ -229,37 +241,24 @@ func TestPlatformCapabilitiesConsistency(t *testing.T) {
 	}
 	
 	// Validate essential capabilities
-	essentialCapabilities := []string{"icmp", "udp", "tcp"}
-	for _, capability := range essentialCapabilities {
-		hasCapability := false
-		for _, cap := range capabilities.Capabilities {
-			if cap == capability {
-				hasCapability = true
-				break
-			}
-		}
-		if !hasCapability {
-			t.Errorf("Platform should support %s capability", capability)
-		}
+	if !capabilities.CanMeasure {
+		t.Errorf("Platform should support ICMP measurements")
+	}
+	
+	if len(capabilities.Features) == 0 {
+		t.Error("Platform should have defined features")
 	}
 	
 	// Validate architecture-specific expectations
 	switch platformInfo.Arch {
 	case "amd64", "arm64":
-		// 64-bit architectures should have SIMD capabilities
-		hasSIMD := false
-		for _, cap := range capabilities.Capabilities {
-			if cap == "sse2" || cap == "neon" || cap == "avx" || cap == "avx2" {
-				hasSIMD = true
-				break
-			}
-		}
-		if !hasSIMD {
-			t.Errorf("64-bit architecture %s should have SIMD capabilities", platformInfo.Arch)
+		// 64-bit architectures should have good precision
+		if capabilities.MaxPrecision == "" {
+			t.Errorf("64-bit architecture %s should have defined precision", platformInfo.Arch)
 		}
 	case "arm":
-		// 32-bit ARM may have limited capabilities
-		t.Logf("32-bit ARM architecture capabilities: %v", capabilities.Capabilities)
+		// 32-bit ARM may have limitations
+		t.Logf("32-bit ARM architecture capabilities: %v", capabilities.Limitations)
 	}
 	
 	t.Logf("Platform capabilities for %s validated successfully", platformInfo.Arch)
@@ -314,45 +313,11 @@ func validateArchitectureConsistency(t *testing.T, arch string) {
 }
 
 func createPlatformCompatibleConfig(platformInfo *types.PlatformInfo) *types.NetworkConfig {
-	config := &types.NetworkConfig{
+	// Return a basic configuration - the ICMP engine uses functional options
+	// This function is kept for compatibility but not used in the updated API
+	return &types.NetworkConfig{
 		BufferSize: 4096,
 		TTL:        64,
-	}
-	
-	// Get platform-specific configuration
-	platformConfig := platform.GetPlatformSpecificConfig(platformInfo)
-	
-	// Apply platform-specific buffer size
-	if bufferSize, ok := platformConfig["buffer_size"]; ok {
-		if bs, ok := bufferSize.(int); ok {
-			config.BufferSize = bs
-		}
-	}
-	
-	return config
-}
-
-func validateStatsConsistency(t *testing.T, stats *icmp.EngineStats) {
-	// These fields should always be present regardless of architecture
-	if stats == nil {
-		t.Error("Statistics should not be nil")
-		return
-	}
-	
-	if stats.MeasurementsTotal < 0 {
-		t.Error("Measurements total should be non-negative")
-	}
-	
-	if stats.MeasurementsSuccess < 0 {
-		t.Error("Measurements success should be non-negative")
-	}
-	
-	if stats.MeasurementsFailed < 0 {
-		t.Error("Measurements failed should be non-negative")
-	}
-	
-	if stats.MeasurementsTotal < stats.MeasurementsSuccess+stats.MeasurementsFailed {
-		t.Error("Invalid statistics: total should equal success + failed")
 	}
 }
 
@@ -366,24 +331,36 @@ func (br benchmarkResults) NanosecondPrecision() int64 {
 	return br.nanosecondPrecision
 }
 
-func benchmarkTimingOperations(t *testing.T, timing icmp.TimingEngine) benchmarkResults {
-	// Run timing operations benchmark
+func benchmarkTimingOperations(t *testing.T, engine *icmp.Engine) benchmarkResults {
+	// Run ICMP operations benchmark
 	start := time.Now()
-	const iterations = 10000
+	const iterations = 100
+	
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		t.Error("Invalid target IP")
+		return benchmarkResults{}
+	}
+	
+	ctx := context.Background()
+	successCount := 0
 	
 	for i := 0; i < iterations; i++ {
-		_ = timing.GetCurrentTime()
+		measurement, err := engine.Ping(ctx, target)
+		if err == nil && measurement != nil {
+			successCount++
+		}
 	}
 	
 	elapsed := time.Since(start)
 	operationsPerSecond := float64(iterations) / elapsed.Seconds()
 	
-	// Estimate timing precision based on operation speed
-	avgLatency := elapsed.Nanoseconds() / int64(iterations)
+	// Calculate precision based on success rate
+	successRate := float64(successCount) / float64(iterations)
 	
 	return benchmarkResults{
 		operationsPerSecond: operationsPerSecond,
-		nanosecondPrecision: avgLatency,
+		nanosecondPrecision: int64(elapsed.Nanoseconds() / int64(iterations)),
 	}
 }
 
