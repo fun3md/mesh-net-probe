@@ -138,9 +138,20 @@ SUCCESS: cmd_target_1 -> 8.8.8.8: 10.5109ms
 
 ## Conclusion
 
-Both requested features have been successfully implemented:
+All requested features have been successfully implemented and documented:
 
 1. ✅ **Command rename completed**: `measure` → `ping` with full functionality preservation
 2. ✅ **Traceroute feature added**: Complete network path tracing with configurable options
+3. ✅ **Documentation updated**: README.md fully updated with `ping` and `traceroute` commands
 
-The tool now provides a comprehensive set of network diagnostic capabilities while maintaining all existing features and improving upon the user experience with more intuitive command naming.
+### Documentation Changes Made:
+- ✅ Updated all command examples from `measure` to `ping`
+- ✅ Added comprehensive traceroute documentation with examples
+- ✅ Added traceroute control flags (`-m, --max-hops`, `--no-dns`)
+- ✅ Added traceroute output examples (with and without DNS)
+- ✅ Updated features section to include "Network Path Tracing"
+- ✅ Updated code structure section to reflect both commands
+- ✅ Added traceroute usage examples for configuration files
+- ✅ Updated final tagline to include both ping and traceroute features
+
+The tool now provides a comprehensive set of network diagnostic capabilities while maintaining all existing features and improving upon the user experience with more intuitive command naming. All documentation is current and accurate.

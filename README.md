@@ -7,6 +7,7 @@ A high-precision ICMP measurement probe with statistical averaging and continuou
 - **Single Measurements**: Precise ICMP ping measurements with microsecond precision
 - **Statistical Averaging**: Average multiple measurements with min, max, and standard deviation
 - **Continuous Monitoring**: Real-time monitoring with configurable intervals
+- **Network Path Tracing**: Complete traceroute with configurable hops and DNS control
 - **Cross-Platform**: Automatic adaptation for Windows, Linux, and macOS
 - **Multiple Output Formats**: Both human-readable text and structured JSON
 - **Configuration-Driven**: JSON-based configuration with CLI override support
@@ -16,20 +17,29 @@ A high-precision ICMP measurement probe with statistical averaging and continuou
 ### Basic Usage
 
 ```bash
-# Single measurement
-./probe.exe measure 8.8.8.8
+# Single ping measurement
+./probe.exe ping 8.8.8.8
 
 # Average 10 measurements
-./probe.exe measure 8.8.8.8 -n 10
+./probe.exe ping 8.8.8.8 -n 10
 
 # Continuous monitoring (default 1-second intervals)
-./probe.exe measure 8.8.8.8 --continuous
+./probe.exe ping 8.8.8.8 --continuous
 
 # Custom interval (5 seconds)
-./probe.exe measure 8.8.8.8 --continuous --interval 5s
+./probe.exe ping 8.8.8.8 --continuous --interval 5s
 
 # JSON output
-./probe.exe measure 8.8.8.8 -n 5 -f json
+./probe.exe ping 8.8.8.8 -n 5 -f json
+
+# Traceroute to a target
+./probe.exe traceroute 8.8.8.8
+
+# Traceroute with limited hops
+./probe.exe traceroute 8.8.8.8 -m 10
+
+# Traceroute without DNS resolution
+./probe.exe traceroute 8.8.8.8 --no-dns
 ```
 
 ### Configuration File
@@ -71,16 +81,22 @@ Create `config.json`:
 
 ```bash
 # Use targets from config
-./probe.exe -c config.json measure
+./probe.exe -c config.json ping
 
 # Average 3 measurements for config targets
-./probe.exe -c config.json measure -n 3
+./probe.exe -c config.json ping -n 3
 
 # Continuous monitoring of config targets
-./probe.exe -c config.json measure --continuous
+./probe.exe -c config.json ping --continuous
 
 # Override interval
-./probe.exe -c config.json measure --continuous --interval 30s
+./probe.exe -c config.json ping --continuous --interval 30s
+
+# Traceroute targets from config
+./probe.exe -c config.json traceroute
+
+# Traceroute with limited hops
+./probe.exe -c config.json traceroute -m 15
 ```
 
 ## 📖 Command Line Reference
@@ -95,13 +111,20 @@ Create `config.json`:
 | `-v, --verbose` | Enable verbose output | false |
 | `-p, --probe-id` | Custom probe identifier | Auto-generated |
 
-### Measurement Control Flags
+### Ping Control Flags
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-n, --count` | Number of measurements for averaging | 1 |
 | `--continuous` | Enable continuous measurement mode | false |
 | `--interval` | Interval for continuous measurements | 1s |
+
+### Traceroute Control Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-m, --max-hops` | Maximum number of hops | 30 |
+| `--no-dns` | Disable DNS hostname resolution | false |
 
 ### Interval Formats
 
@@ -111,15 +134,15 @@ Supported duration formats:
 
 ## 📊 Output Examples
 
-### Single Measurement (Text)
+### Single Ping Measurement (Text)
 ```bash
-$ ./probe.exe measure 8.8.8.8
+$ ./probe.exe ping 8.8.8.8
 SUCCESS: cmd_target_1 -> 8.8.8.8: 10.5154ms
 ```
 
-### Averaged Measurements (Text)
+### Averaged Ping Measurements (Text)
 ```bash
-$ ./probe.exe measure 8.8.8.8 -n 5 -v
+$ ./probe.exe ping 8.8.8.8 -n 5 -v
 Using 1 targets from command line
 Performing 5 measurements per target for averaging
 Measurement round 1/5
@@ -137,9 +160,9 @@ cmd_target_1 -> 8.8.8.8:
   Success Rate: 100.0% (5/5)
 ```
 
-### Single Measurement (JSON)
+### Ping Measurement (JSON)
 ```bash
-$ ./probe.exe measure 8.8.8.8 -f json
+$ ./probe.exe ping 8.8.8.8 -f json
 {
   "results": [
     {
@@ -155,9 +178,9 @@ $ ./probe.exe measure 8.8.8.8 -f json
 }
 ```
 
-### Averaged Measurements (JSON)
+### Averaged Ping Measurements (JSON)
 ```bash
-$ ./probe.exe measure 8.8.8.8 -n 3 -f json
+$ ./probe.exe ping 8.8.8.8 -n 3 -f json
 {
   "measurement_count": 3,
   "results": [
@@ -177,9 +200,9 @@ $ ./probe.exe measure 8.8.8.8 -n 3 -f json
 }
 ```
 
-### Continuous Mode
+### Continuous Ping Mode
 ```bash
-$ ./probe.exe measure 8.8.8.8 --continuous
+$ ./probe.exe ping 8.8.8.8 --continuous
 Starting continuous measurements with 1s interval
 Continuous measurement round 1
 SUCCESS: cmd_target_1 -> 8.8.8.8: 10.007ms
@@ -190,54 +213,91 @@ SUCCESS: cmd_target_1 -> 8.8.8.8: 10.5172ms
 ...
 ```
 
+### Traceroute Output
+```bash
+$ ./probe.exe traceroute 8.8.8.8
+ 1  192.168.1.1 (192.168.1.1)         1.234ms
+ 2  10.0.0.1 (10.0.0.1)               5.678ms
+ 3  8.8.8.8 (google-public-dns-a.google.com)  10.123ms
+```
+
+### Traceroute without DNS
+```bash
+$ ./probe.exe traceroute 8.8.8.8 --no-dns
+ 1  192.168.1.1                       1.234ms
+ 2  10.0.0.1                          5.678ms
+ 3  8.8.8.8                           10.123ms
+```
+
 ## 🔧 Command Examples
 
 ### Single Target
 ```bash
 # Basic ping
-./probe.exe measure 8.8.8.8
+./probe.exe ping 8.8.8.8
 
 # 10 measurements average
-./probe.exe measure 8.8.8.8 -n 10
+./probe.exe ping 8.8.8.8 -n 10
 
 # JSON output
-./probe.exe measure 8.8.8.8 -f json
+./probe.exe ping 8.8.8.8 -f json
 ```
 
 ### Multiple Targets
 ```bash
 # Multiple CLI targets
-./probe.exe measure 8.8.8.8 1.1.1.1 8.8.4.4
+./probe.exe ping 8.8.8.8 1.1.1.1 8.8.4.4
 
 # Average 5 measurements
-./probe.exe measure 8.8.8.8 1.1.1.1 -n 5
+./probe.exe ping 8.8.8.8 1.1.1.1 -n 5
 
 # Mixed configuration and CLI
-./probe.exe -c config.json measure 1.1.1.1
+./probe.exe -c config.json ping 1.1.1.1
 ```
 
 ### Continuous Monitoring
 ```bash
 # Default 1-second intervals
-./probe.exe measure 8.8.8.8 --continuous
+./probe.exe ping 8.8.8.8 --continuous
 
 # 5-second intervals
-./probe.exe measure 8.8.8.8 --continuous --interval 5s
+./probe.exe ping 8.8.8.8 --continuous --interval 5s
 
 # Monitor config targets
-./probe.exe -c config.json measure --continuous --interval 30s
+./probe.exe -c config.json ping --continuous --interval 30s
+```
+
+### Traceroute Examples
+```bash
+# Basic traceroute
+./probe.exe traceroute 8.8.8.8
+
+# Traceroute with limited hops
+./probe.exe traceroute 8.8.8.8 -m 10
+
+# Traceroute without DNS resolution
+./probe.exe traceroute 8.8.8.8 --no-dns
+
+# Traceroute with verbose output
+./probe.exe traceroute 8.8.8.8 -v
 ```
 
 ### Advanced Examples
 ```bash
 # Verbose continuous mode with custom interval
-./probe.exe -c config.json measure -v --continuous --interval 10s
+./probe.exe -c config.json ping -v --continuous --interval 10s
 
 # High-precision averaging (20 samples) with JSON output
-./probe.exe measure 8.8.8.8 -n 20 -f json
+./probe.exe ping 8.8.8.8 -n 20 -f json
 
 # Debug logging
-./probe.exe measure 8.8.8.8 -l debug -n 3
+./probe.exe ping 8.8.8.8 -l debug -n 3
+
+# Traceroute configuration targets
+./probe.exe -c config.json traceroute
+
+# Traceroute with custom hop limit for config
+./probe.exe -c config.json traceroute -m 15
 ```
 
 ## 🏗️ Architecture
@@ -312,11 +372,11 @@ go test -race ./...
 
 ```
 cmd/probe/
-├── main.go              # Command line interface and orchestration
+├── main.go              # Command line interface and orchestration (ping + traceroute commands)
 
 internal/
 ├── icmp/
-│   └── engine.go        # ICMP measurement engine with simulation mode
+│   └── engine.go        # ICMP measurement engine with simulation mode and traceroute support
 ├── platform/
 │   └── detection.go     # Cross-platform detection and compatibility
 ├── config/
@@ -327,6 +387,7 @@ internal/
 pkg/types/
 ├── config.go            # Configuration data structures
 ├── measurement.go       # Measurement result structures
+├── probe.go             # Probe command structures and definitions
 └── target.go            # Target configuration structures
 ```
 
@@ -377,4 +438,4 @@ For support, please open an issue in the repository or contact the development t
 
 ---
 
-*Mesh Probe System - High-precision ICMP measurements with statistical analysis and continuous monitoring*
+*Mesh Probe System - High-precision ICMP measurements with statistical analysis, continuous monitoring, and network path tracing*
