@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"time"
@@ -20,13 +21,16 @@ import (
 
 // Global variables for the application
 var (
-	configFile   string
-	logLevel     string
-	logFormat    string
-	otlpEndpoint string
-	probeID      string
-	verbose      bool
-	daemon       bool
+	configFile        string
+	logLevel          string
+	logFormat         string
+	otlpEndpoint      string
+	probeID           string
+	verbose           bool
+	daemon            bool
+	measureCount      int
+	continuousMode    bool
+	continuousInterval time.Duration
 )
 
 // ProbeApplication represents the main application instance
@@ -168,6 +172,15 @@ func (app *ProbeApplication) runInteractive() error {
 }
 
 func (app *ProbeApplication) outputResults(measurements []*types.MeasurementData) error {
+	// Use JSON format if specified
+	if logFormat == "json" {
+		return app.outputJSONResults(measurements)
+	} else {
+		return app.outputTextResults(measurements)
+	}
+}
+
+func (app *ProbeApplication) outputTextResults(measurements []*types.MeasurementData) error {
 	for _, measurement := range measurements {
 		if measurement.Success {
 			fmt.Printf("SUCCESS: %s -> %s: %v\n",
@@ -183,6 +196,137 @@ func (app *ProbeApplication) outputResults(measurements []*types.MeasurementData
 			)
 		}
 	}
+	return nil
+}
+
+func (app *ProbeApplication) outputJSONResults(measurements []*types.MeasurementData) error {
+	// Create a structured JSON response
+	type MeasurementResult struct {
+		Success bool   `json:"success"`
+		Target  string `json:"target"`
+		Address string `json:"address"`
+		RTT     string `json:"rtt,omitempty"`
+		Error   string `json:"error,omitempty"`
+	}
+	
+	type OutputResponse struct {
+		Results       []MeasurementResult `json:"results"`
+		TotalTargets  int                 `json:"total_targets"`
+		SuccessCount  int                 `json:"success_count"`
+		FailureCount  int                 `json:"failure_count"`
+	}
+	
+	var response OutputResponse
+	response.Results = make([]MeasurementResult, 0, len(measurements))
+	
+	for _, measurement := range measurements {
+		result := MeasurementResult{
+			Success: measurement.Success,
+			Target:  measurement.Target.ID,
+			Address: measurement.DestIP.String(),
+		}
+		
+		if measurement.Success {
+			result.RTT = measurement.RTT.String()
+			response.SuccessCount++
+		} else {
+			result.Error = measurement.ErrorMessage
+			response.FailureCount++
+		}
+		
+		response.Results = append(response.Results, result)
+	}
+	
+	response.TotalTargets = len(measurements)
+	
+	// Marshal and output JSON
+	jsonData, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON output: %w", err)
+	}
+	
+	fmt.Printf("%s\n", string(jsonData))
+	return nil
+}
+
+func (app *ProbeApplication) outputAveragedResults(allMeasurements [][]*types.MeasurementData, targets []*types.NetworkTarget) error {
+	// Calculate statistics for each target
+	stats := make([]*TargetStats, len(targets))
+	
+	for i := range targets {
+		stats[i] = calculateTargetStats(allMeasurements, i)
+	}
+	
+	// Output results based on format
+	if logFormat == "json" {
+		return app.outputAveragedJSONResults(stats, targets)
+	} else {
+		return app.outputAveragedTextResults(stats, targets)
+	}
+}
+
+func (app *ProbeApplication) outputAveragedTextResults(stats []*TargetStats, targets []*types.NetworkTarget) error {
+	fmt.Printf("\n=== Averaged Results (%d measurements) ===\n", measureCount)
+	
+	for i, target := range targets {
+		s := stats[i]
+		fmt.Printf("%s -> %s:\n", target.ID, target.Address.String())
+		fmt.Printf("  Average: %v\n", s.Average)
+		fmt.Printf("  Min: %v\n", s.Min)
+		fmt.Printf("  Max: %v\n", s.Max)
+		fmt.Printf("  StdDev: %v\n", s.StandardDeviation)
+		fmt.Printf("  Success Rate: %.1f%% (%d/%d)\n", s.SuccessRate*100, s.SuccessCount, s.TotalCount)
+	}
+	
+	return nil
+}
+
+func (app *ProbeApplication) outputAveragedJSONResults(stats []*TargetStats, targets []*types.NetworkTarget) error {
+	type AveragedMeasurementResult struct {
+		Target              string  `json:"target"`
+		Address             string  `json:"address"`
+		AverageRTT          string  `json:"average_rtt"`
+		MinRTT              string  `json:"min_rtt"`
+		MaxRTT              string  `json:"max_rtt"`
+		StandardDeviation   string  `json:"std_dev"`
+		SuccessRate         float64 `json:"success_rate"`
+		TotalMeasurements   int     `json:"total_measurements"`
+		SuccessfulCount     int     `json:"successful_count"`
+		FailedCount         int     `json:"failed_count"`
+	}
+	
+	type OutputResponse struct {
+		MeasurementCount int                     `json:"measurement_count"`
+		Results          []AveragedMeasurementResult `json:"results"`
+	}
+	
+	var response OutputResponse
+	response.MeasurementCount = measureCount
+	response.Results = make([]AveragedMeasurementResult, len(targets))
+	
+	for i, target := range targets {
+		s := stats[i]
+		response.Results[i] = AveragedMeasurementResult{
+			Target:              target.ID,
+			Address:             target.Address.String(),
+			AverageRTT:          s.Average.String(),
+			MinRTT:              s.Min.String(),
+			MaxRTT:              s.Max.String(),
+			StandardDeviation:   s.StandardDeviation.String(),
+			SuccessRate:         s.SuccessRate,
+			TotalMeasurements:   s.TotalCount,
+			SuccessfulCount:     s.SuccessCount,
+			FailedCount:         s.FailedCount,
+		}
+	}
+	
+	// Marshal and output JSON
+	jsonData, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON output: %w", err)
+	}
+	
+	fmt.Printf("%s\n", string(jsonData))
 	return nil
 }
 
@@ -371,17 +515,24 @@ var systemCmd = &cobra.Command{
 var measureCmd = &cobra.Command{
 	Use:   "measure [target...]",
 	Short: "Perform ICMP measurements to specified targets",
-	Long:  "Perform single ICMP measurements to the specified target IP addresses or hostnames.",
+	Long:  "Perform single ICMP measurements to the specified target IP addresses or hostnames. If no targets are specified, uses targets from the configuration file.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return fmt.Errorf("at least one target is required")
-		}
-		
 		// Create app with proper configuration loading
 		app := NewProbeApplication()
 		
 		// Load configuration first
 		app.config = loadConfiguration()
+		
+		// Check if we have CLI targets or should use config targets
+		if len(args) == 0 {
+			// No CLI targets provided, check if config has targets
+			if len(app.config.Targets) == 0 {
+				return fmt.Errorf("no targets provided in CLI and no targets configured in config file")
+			}
+			fmt.Printf("Using %d targets from configuration\n", len(app.config.Targets))
+		} else {
+			fmt.Printf("Using %d targets from command line\n", len(args))
+		}
 		
 		// Initialize platform
 		var err error
@@ -419,7 +570,12 @@ var measureCmd = &cobra.Command{
 		// Generate probe ID
 		app.probeID = generateProbeID()
 		
-		return app.performMeasurements(args)
+		// Perform measurements using CLI targets or fall back to config targets
+		if len(args) > 0 {
+			return app.performMeasurements(args)
+		} else {
+			return app.performMeasurementsFromConfig()
+		}
 	},
 }
 
@@ -436,12 +592,98 @@ func (app *ProbeApplication) performMeasurements(targets []string) error {
 		}
 	}
 	
-	measurements, err := app.engine.MeasureBatch(app.ctx, networkTargets)
-	if err != nil {
-		return fmt.Errorf("measurements failed: %w", err)
+	return app.performMeasurementLoop(networkTargets)
+}
+
+func (app *ProbeApplication) performMeasurementLoop(targets []*types.NetworkTarget) error {
+	if continuousMode {
+		return app.performContinuousMeasurements(targets)
+	} else if measureCount > 1 {
+		return app.performAveragedMeasurements(targets)
+	} else {
+		// Single measurement
+		measurements, err := app.engine.MeasureBatch(app.ctx, targets)
+		if err != nil {
+			return fmt.Errorf("measurements failed: %w", err)
+		}
+		return app.outputResults(measurements)
+	}
+}
+
+func (app *ProbeApplication) performAveragedMeasurements(targets []*types.NetworkTarget) error {
+	fmt.Printf("Performing %d measurements per target for averaging\n", measureCount)
+	
+	// For averaging, we need to run multiple rounds of measurements
+	// and calculate statistics
+	allMeasurements := make([][]*types.MeasurementData, measureCount)
+	
+	for round := 0; round < measureCount; round++ {
+		if verbose {
+			fmt.Printf("Measurement round %d/%d\n", round+1, measureCount)
+		}
+		
+		measurements, err := app.engine.MeasureBatch(app.ctx, targets)
+		if err != nil {
+			return fmt.Errorf("measurement round %d failed: %w", round+1, err)
+		}
+		
+		allMeasurements[round] = measurements
+		
+		// Small delay between measurements to avoid rate limiting
+		if round < measureCount-1 {
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 	
-	return app.outputResults(measurements)
+	// Calculate statistics and output results
+	return app.outputAveragedResults(allMeasurements, targets)
+}
+
+func (app *ProbeApplication) performContinuousMeasurements(targets []*types.NetworkTarget) error {
+	fmt.Printf("Starting continuous measurements with %v interval\n", continuousInterval)
+	
+	measurementRound := 1
+	
+	for {
+		select {
+		case <-app.ctx.Done():
+			fmt.Printf("Continuous measurement stopped after %d rounds\n", measurementRound-1)
+			return nil
+		default:
+		}
+		
+		fmt.Printf("Continuous measurement round %d\n", measurementRound)
+		
+		measurements, err := app.engine.MeasureBatch(app.ctx, targets)
+		if err != nil {
+			fmt.Printf("Continuous measurement round %d failed: %v\n", measurementRound, err)
+		} else {
+			app.outputResults(measurements)
+		}
+		
+		measurementRound++
+		
+		// Wait for next interval
+		timer := time.NewTimer(continuousInterval)
+		select {
+		case <-app.ctx.Done():
+			timer.Stop()
+			fmt.Printf("Continuous measurement stopped after %d rounds\n", measurementRound-1)
+			return nil
+		case <-timer.C:
+			// Continue to next measurement
+		}
+	}
+}
+
+func (app *ProbeApplication) performMeasurementsFromConfig() error {
+	// Use targets from configuration
+	targets := toPointerSlice(app.config.Targets)
+	if len(targets) == 0 {
+		return fmt.Errorf("no targets configured in config file")
+	}
+	
+	return app.performMeasurementLoop(targets)
 }
 
 func parseIP(target string) net.IP {
@@ -468,6 +710,83 @@ func toPointerSlice(targets []types.NetworkTarget) []*types.NetworkTarget {
 	return ptrSlice
 }
 
+// TargetStats contains statistical analysis of multiple measurements
+type TargetStats struct {
+	Average          time.Duration
+	Min              time.Duration
+	Max              time.Duration
+	StandardDeviation time.Duration
+	SuccessRate      float64
+	TotalCount       int
+	SuccessCount     int
+	FailedCount      int
+}
+
+// calculateTargetStats calculates statistics for a specific target across all measurement rounds
+func calculateTargetStats(allMeasurements [][]*types.MeasurementData, targetIndex int) *TargetStats {
+	var totalRTT time.Duration
+	var successCount int
+	var failedCount int
+	var minRTT time.Duration
+	var maxRTT time.Duration
+	var firstSuccess bool
+	
+	var rtts []time.Duration
+	
+	// Collect all RTTs and count successes/failures
+	for _, roundMeasurements := range allMeasurements {
+		if targetIndex < len(roundMeasurements) {
+			measurement := roundMeasurements[targetIndex]
+			if measurement.Success {
+				successCount++
+				totalRTT += measurement.RTT
+				rtts = append(rtts, measurement.RTT)
+				
+				if !firstSuccess || measurement.RTT < minRTT {
+					minRTT = measurement.RTT
+				}
+				if !firstSuccess || measurement.RTT > maxRTT {
+					maxRTT = measurement.RTT
+				}
+				firstSuccess = true
+			} else {
+				failedCount++
+			}
+		}
+	}
+	
+	totalCount := successCount + failedCount
+	successRate := float64(successCount) / float64(totalCount)
+	
+	var average time.Duration
+	var stdDev time.Duration
+	
+	if successCount > 0 {
+		average = totalRTT / time.Duration(successCount)
+		
+		// Calculate standard deviation
+		if len(rtts) > 1 {
+			var sumSqDiff time.Duration
+			for _, rtt := range rtts {
+				diff := rtt - average
+				sumSqDiff += diff * diff
+			}
+			stdDev = time.Duration(math.Sqrt(float64(sumSqDiff) / float64(len(rtts)-1)))
+		}
+	}
+	
+	return &TargetStats{
+		Average:            average,
+		Min:                minRTT,
+		Max:                maxRTT,
+		StandardDeviation:  stdDev,
+		SuccessRate:        successRate,
+		TotalCount:         totalCount,
+		SuccessCount:       successCount,
+		FailedCount:        failedCount,
+	}
+}
+
 // Main entry point
 
 func main() {
@@ -479,6 +798,11 @@ func main() {
 	rootCmd.PersistentFlags().StringVarP(&probeID, "probe-id", "p", "", "Probe identifier")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().BoolVarP(&daemon, "daemon", "d", false, "Run as daemon")
+	
+	// Measurement control flags
+	rootCmd.PersistentFlags().IntVarP(&measureCount, "count", "n", 1, "Number of measurements to average (for averaging mode)")
+	rootCmd.PersistentFlags().BoolVar(&continuousMode, "continuous", false, "Enable continuous measurement mode")
+	rootCmd.PersistentFlags().DurationVar(&continuousInterval, "interval", 1*time.Second, "Interval for continuous measurements (e.g., 30s, 1m, 5m)")
 	
 	// Add subcommands
 	rootCmd.AddCommand(systemCmd)
