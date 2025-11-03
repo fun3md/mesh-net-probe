@@ -2,7 +2,7 @@ name: Cross-Platform CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, 001-mesh-probe-system ]
   pull_request:
     branches: [ main ]
 
