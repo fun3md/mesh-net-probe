@@ -103,7 +103,7 @@ WORKDIR /app
 COPY --from=builder-web /app/admin-web-* /usr/local/bin/
 
 # Copy web assets if they exist
-COPY --from=builder-web /app/web/build /app/web/
+COPY --from=builder-web /app/web/dist /app/web/
 
 # Change ownership
 RUN chown -R probe:probe /app

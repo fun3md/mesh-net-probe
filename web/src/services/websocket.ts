@@ -1,7 +1,14 @@
 import { io, Socket } from 'socket.io-client';
-import type { WebSocketMessage, Probe, Measurement, Alert, DashboardStats } from '@/types';
+import type { Probe, Alert } from '@/types';
 
-export type WebSocketEventType = 
+// Extend the ImportMeta interface to include env
+declare global {
+  interface ImportMeta {
+    env: Record<string, string>;
+  }
+}
+
+export type WebSocketEventType =
   | 'probe_update'
   | 'measurement'
   | 'health_status'
@@ -29,7 +36,7 @@ class WebSocketService {
   connect(url?: string): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        const socketUrl = url || `${import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8080'}`;
+        const socketUrl = url || `${(import.meta as any).env?.VITE_WS_BASE_URL || 'ws://localhost:8080'}`;
         
         this.socket = io(socketUrl, {
           autoConnect: true,
@@ -188,7 +195,7 @@ class WebSocketService {
   }
 
   // Utility methods
-  private cleanup(): void {
+  cleanup(): void {
     this.eventHandlers.forEach(handlers => {
       handlers.clear();
     });

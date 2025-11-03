@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Database, RefreshCw } from 'lucide-react';
+import { Settings } from 'lucide-react';
 
 const Configuration: React.FC = () => {
   return (

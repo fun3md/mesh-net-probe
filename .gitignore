@@ -55,3 +55,6 @@ coverage.html
 # Temporary files
 tmp/
 temp/
+
+# npm
+web/node_modules/

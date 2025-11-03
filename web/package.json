@@ -11,19 +11,20 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.3.2",
+    "axios": "^1.6.2",
+    "lucide-react": "^0.244.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.8.0",
-    "lucide-react": "^0.244.0",
-    "recharts": "^2.8.0",
-    "axios": "^1.6.2",
-    "socket.io-client": "^4.7.4",
-    "zustand": "^4.4.7",
     "react-hook-form": "^7.48.2",
+    "react-router-dom": "^6.8.0",
+    "recharts": "^2.8.0",
+    "socket.io-client": "^4.7.4",
     "zod": "^3.22.4",
-    "@hookform/resolvers": "^3.3.2"
+    "zustand": "^4.4.7"
   },
   "devDependencies": {
+    "@types/axios": "^0.14.4",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@typescript-eslint/eslint-plugin": "^6.14.0",

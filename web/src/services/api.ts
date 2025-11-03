@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import axios, { AxiosResponse } from 'axios';
 import type {
   Probe,
   Measurement,
@@ -6,7 +6,6 @@ import type {
   User,
   LoginRequest,
   LoginResponse,
-  ApiResponse,
   PaginatedResponse,
   DashboardStats,
   Alert,
@@ -15,12 +14,19 @@ import type {
   MeasurementStatistics
 } from '@/types';
 
+// Extend the ImportMeta interface to include env
+declare global {
+  interface ImportMeta {
+    env: Record<string, string>;
+  }
+}
+
 class ApiService {
-  private client: AxiosInstance;
+  private client: any;
   private baseURL: string;
 
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api/v1';
+    this.baseURL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8080/api/v1';
     
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -31,9 +37,9 @@ class ApiService {
     });
 
     // Add request interceptor to include auth token
-    this.client.interceptors.request.use((config) => {
+    this.client.interceptors.request.use((config: any) => {
       const token = localStorage.getItem('auth_token');
-      if (token) {
+      if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
       }
       return config;
@@ -41,8 +47,8 @@ class ApiService {
 
     // Add response interceptor for error handling
     this.client.interceptors.response.use(
-      (response) => response,
-      (error) => {
+      (response: AxiosResponse) => response,
+      (error: any) => {
         if (error.response?.status === 401) {
           // Token expired or invalid
           localStorage.removeItem('auth_token');

@@ -5,13 +5,10 @@ import {
   CheckCircle,
   Clock,
   TrendingUp,
-  TrendingDown,
-  Server,
-  Users,
-  Zap
+  Server
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import type { DashboardStats, Probe, Alert, WebSocketMessage } from '@/types';
+import type { DashboardStats, Probe, Alert } from '@/types';
 import { apiService } from '@/services/api';
 import { webSocketService } from '@/services/websocket';
 

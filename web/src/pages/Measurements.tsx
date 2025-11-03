@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, TrendingUp, Activity } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 
 const Measurements: React.FC = () => {
   return (
