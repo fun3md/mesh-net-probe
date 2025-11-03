@@ -80,11 +80,22 @@ COPY --from=builder-cli /app/probe-cli-* /usr/local/bin/
 # Change ownership
 RUN chown probe:probe /usr/local/bin/probe-cli-*
 
+# Create entrypoint script to handle platform-specific binaries (must be before USER probe)
+RUN echo '#!/bin/sh\n\
+cmd="/usr/local/bin/probe-cli-$(uname -s | tr "[:upper:]" "[:lower:]")-$(uname -m)"\n\
+if [ -f "$cmd" ]; then\n\
+  exec "$cmd" "$@"\n\
+else\n\
+  # Fallback to amd64 if specific binary not found\n\
+  exec "/usr/local/bin/probe-cli-amd64" "$@"\n\
+fi\n\
+' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh && chown probe:probe /app/entrypoint.sh
+
 # Switch to non-root user
 USER probe
 
 # Set entrypoint
-ENTRYPOINT ["/usr/local/bin/probe-cli-linux-amd64"]
+ENTRYPOINT ["/usr/local/bin/probe-cli-amd64"]
 
 # Runtime stage for admin web interface
 FROM --platform=$TARGETPLATFORM alpine:latest AS runtime-web
@@ -108,14 +119,25 @@ COPY --from=builder-web /app/web/dist /app/web/
 # Change ownership
 RUN chown -R probe:probe /app
 
+# Create entrypoint script to handle platform-specific binaries (must be before USER probe)
+RUN echo '#!/bin/sh\n\
+cmd="/usr/local/bin/admin-web-$(uname -s | tr "[:upper:]" "[:lower:]")-$(uname -m)"\n\
+if [ -f "$cmd" ]; then\n\
+  exec "$cmd" "$@"\n\
+else\n\
+  # Fallback to amd64 if specific binary not found\n\
+  exec "/usr/local/bin/admin-web-amd64" "$@"\n\
+fi\n\
+' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh && chown probe:probe /app/entrypoint.sh
+
 # Switch to non-root user
 USER probe
 
 # Expose ports (HTTP and WebSocket)
 EXPOSE 8080 8081
 
-# Set entrypoint
-ENTRYPOINT ["/usr/local/bin/admin-web-linux-amd64"]
+# Set entrypoint to use amd64 binary directly
+ENTRYPOINT ["/usr/local/bin/admin-web-amd64"]
 
 # Default command
 CMD ["--help"]
