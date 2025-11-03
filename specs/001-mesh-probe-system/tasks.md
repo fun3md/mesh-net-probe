@@ -163,6 +163,60 @@ description: "Task list template for feature implementation"
 
 ---
 
+## Phase 5.5: User Story 4 - Admin Web Interface and Real-time Monitoring (Priority: P3)
+
+**Goal**: Network operations team can use a web-based interface to create and manage probe configurations, monitor probe health in real-time, and view live measurement data through an intuitive dashboard
+
+**Independent Test**: Deploy admin web interface, create configurations through web UI, deploy probes that register with web interface, verify real-time monitoring and live measurement streaming
+
+### Tests for User Story 4 (OPTIONAL - only if tests requested) ⚠️
+
+- [ ] T062 [P] [US4] Web interface API contract tests in tests/contract/test_web_api.go
+- [ ] T063 [P] [US4] WebSocket real-time communication tests in tests/contract/test_websocket.go
+- [ ] T064 [P] [US4] React component integration tests in tests/web/components/
+- [ ] T065 [US4] End-to-end web interface tests in tests/web/e2e/test_admin_interface.go
+- [ ] T066 [US4] Cross-platform web interface deployment tests in tests/integration/test_web_deployment.go
+
+### Implementation for User Story 4
+
+**Backend Services:**
+- [ ] T067 [P] [US4] Create admin web interface backend in cmd/admin-web/main.go
+- [ ] T068 [P] [US4] Implement REST API endpoints for configuration management in internal/web/api/
+- [ ] T069 [P] [US4] Implement WebSocket service for real-time communication in internal/web/websocket/
+- [ ] T070 [P] [US4] Create probe registry and health monitoring service in internal/monitoring/
+- [ ] T071 [P] [US4] Implement authentication and authorization middleware in internal/web/auth/
+- [ ] T072 [US4] Create configuration CRUD operations integrated with etcd provider in internal/config/web.go
+- [ ] T073 [US4] Implement real-time measurement streaming from probes in internal/monitoring/stream.go
+- [ ] T074 [US4] Add probe registration and heartbeat tracking in internal/monitoring/probe_registry.go
+
+**Frontend Interface:**
+- [ ] T075 [P] [US4] Setup React + TypeScript project structure in web/ directory
+- [ ] T076 [P] [US4] Implement main dashboard layout with responsive design in web/src/pages/
+- [ ] T077 [P] [US4] Create configuration management interface in web/src/components/ConfigManager/
+- [ ] T078 [P] [US4] Implement real-time probe monitoring dashboard in web/src/components/ProbeMonitor/
+- [ ] T079 [P] [US4] Build WebSocket client for live updates in web/src/services/websocket.ts
+- [ ] T080 [P] [US4] Create interactive charts for measurement visualization in web/src/components/Charts/
+- [ ] T081 [US4] Implement configuration editor with JSON validation in web/src/components/ConfigEditor/
+- [ ] T082 [US4] Add real-time alert system and notifications in web/src/components/Alerts/
+
+**Integration and Deployment:**
+- [ ] T083 [P] [US4] Configure multi-platform build for admin web service in Docker and native binaries
+- [ ] T084 [P] [US4] Setup CI/CD pipeline for both Go backend and React frontend
+- [ ] T085 [US4] Implement integration between web interface and existing CLI tools
+- [ ] T086 [US4] Add probe registration commands to CLI tools for web integration
+- [ ] T087 [US4] Create Kubernetes deployment manifests for admin web interface
+- [ ] T088 [US4] Implement health monitoring and metrics export for web interface
+
+**Real-time Features:**
+- [ ] T089 [US4] Implement live measurement streaming with WebSocket in backend
+- [ ] T090 [US4] Create real-time probe status updates in web dashboard
+- [ ] T091 [US4] Add instant configuration deployment to registered probes
+- [ ] T092 [US4] Implement push notifications for critical alerts in web interface
+
+**Checkpoint**: At this point, User Story 4 should provide a complete web-based management interface integrated with the existing CLI tools
+
+---
+
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 **Purpose**: Improvements that affect multiple user stories
@@ -195,6 +249,7 @@ description: "Task list template for feature implementation"
 - **User Story 1 (P1)**: Can start after Foundational (Phase 2) - No dependencies on other stories
 - **User Story 2 (P2)**: Can start after Foundational (Phase 2) - May integrate with US1 but should be independently testable
 - **User Story 3 (P3)**: Can start after Foundational (Phase 2) - May integrate with US1/US2 but should be independently testable
+- **User Story 4 (P3)**: Can start after Foundational (Phase 2) - Strong integration with US3 (configuration management) and US1 (probe monitoring), web interface can be developed in parallel
 
 ### Within Each User Story
 
