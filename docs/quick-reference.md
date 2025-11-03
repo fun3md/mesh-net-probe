@@ -256,7 +256,7 @@ spec:
       - name: config
         configMap:
           name: mesh-probe-config
-      - name: data:
+      - name: data
         emptyDir: {}
 ```
 

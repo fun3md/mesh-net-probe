@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric/noop"
-	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/mesh-net-probe/probe/internal/telemetry"
 	"github.com/mesh-net-probe/probe/pkg/types"
@@ -22,35 +20,16 @@ func TestOpenTelemetryIntegration(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Initialize OpenTelemetry with noop exporter for testing
-	otel.SetMeterProvider(noop.NewMeterProvider())
-	otel.SetTracerProvider(noop.NewTracerProvider())
+	// Initialize OpenTelemetry (default provider)
+	otel.SetMeterProvider(nil)
+	otel.SetTracerProvider(nil)
 
 	// Create telemetry components
 	meterProvider := telemetry.NewOTELMeterProvider()
 	tracerProvider := telemetry.NewOTELTracerProvider()
 
-	// Create test configuration
-	config := &types.TelemetryConfig{
-		Enabled:     true,
-		Endpoint:    "http://localhost:4317", // OTLP/gRPC endpoint
-		ServiceName: "mesh-probe-test",
-		ServiceVersion: "1.0.0",
-		ExportInterval: 5 * time.Second,
-		Metrics: types.MetricsConfig{
-			Enabled:      true,
-			ExportLevel:  "info",
-			Histograms:   true,
-			Counters:     true,
-		},
-		Tracing: types.TracingConfig{
-			Enabled:      true,
-			SamplingRate: 1.0,
-		},
-	}
-
 	// Test meter provider initialization
-	err := meterProvider.Initialize(config.Metrics)
+	err := meterProvider.Initialize(nil)
 	if err != nil {
 		t.Fatalf("Failed to initialize meter provider: %v", err)
 	}
@@ -64,6 +43,7 @@ func TestOpenTelemetryIntegration(t *testing.T) {
 
 	// Create test measurement data
 	measurement := &types.MeasurementData{
+		ID:          "test-001",
 		ProbeID:     "test-probe-001",
 		Target:      createTestTarget("test-target-001", "127.0.0.1"),
 		RTT:         1500 * time.Microsecond,
@@ -72,7 +52,7 @@ func TestOpenTelemetryIntegration(t *testing.T) {
 		PacketSize:  56,
 		SourceIP:    net.ParseIP("127.0.0.1"),
 		Timestamp:   time.Now(),
-		ErrorCode:   0,
+		ErrorCode:   types.ICMPErrNoError,
 		ErrorMessage: "",
 	}
 
@@ -92,6 +72,7 @@ func TestOpenTelemetryIntegration(t *testing.T) {
 
 	// Create failed measurement
 	failedMeasurement := &types.MeasurementData{
+		ID:          "test-error-001",
 		ProbeID:       "test-probe-001",
 		Target:        createTestTarget("test-target-002", "127.0.0.1"),
 		RTT:           0,
@@ -100,7 +81,7 @@ func TestOpenTelemetryIntegration(t *testing.T) {
 		PacketSize:    0,
 		SourceIP:      nil,
 		Timestamp:     time.Now(),
-		ErrorCode:     1,
+		ErrorCode:     types.ICMPErrTimeout,
 		ErrorMessage:  "Connection timeout",
 	}
 
@@ -122,18 +103,6 @@ func TestOpenTelemetryIntegration(t *testing.T) {
 	// Test error recording
 	meterProvider.RecordError("network_error", "Connection refused", "test-probe-001")
 
-	// Test probe metrics recording
-	probeMetrics := &types.ProbeMetrics{
-		CPUUsage:        15.5,
-		MemoryUsage:     256 * 1024 * 1024, // 256 MB
-		NetworkBytes:    1024 * 1024,       // 1 MB
-		MeasurementsPerSecond: 10.5,
-	}
-	err = meterProvider.RecordProbeMetrics(probeMetrics)
-	if err != nil {
-		t.Errorf("Failed to record probe metrics: %v", err)
-	}
-
 	// Test probe uptime recording
 	meterProvider.RecordProbeUptime(3600) // 1 hour
 
@@ -142,23 +111,13 @@ func TestOpenTelemetryIntegration(t *testing.T) {
 
 // TestOpenTelemetryMetricsValidation validates OpenTelemetry metrics format and structure
 func TestOpenTelemetryMetricsValidation(t *testing.T) {
-	ctx := context.Background()
-
-	// Initialize with noop provider for testing
-	otel.SetMeterProvider(noop.NewMeterProvider())
-	otel.SetTracerProvider(noop.NewTracerProvider())
+	// Initialize with default provider
+	otel.SetMeterProvider(nil)
+	otel.SetTracerProvider(nil)
 
 	meterProvider := telemetry.NewOTELMeterProvider()
 
-	// Test with minimal metrics configuration
-	config := &types.MetricsConfig{
-		Enabled:      true,
-		ExportLevel:  "debug",
-		Histograms:   true,
-		Counters:     true,
-	}
-
-	err := meterProvider.Initialize(config)
+	err := meterProvider.Initialize(nil)
 	if err != nil {
 		t.Fatalf("Failed to initialize meter provider for validation: %v", err)
 	}
@@ -172,15 +131,16 @@ func TestOpenTelemetryMetricsValidation(t *testing.T) {
 		{
 			name: "successful measurement",
 			measurement: &types.MeasurementData{
-				ProbeID:      "validation-probe-001",
-				Target:       createTestTarget("validation-target-001", "8.8.8.8"),
-				RTT:          25000 * time.Microsecond,
-				Success:      true,
-				TTL:          64,
-				PacketSize:   56,
-				SourceIP:     net.ParseIP("192.168.1.100"),
-				Timestamp:    time.Now(),
-				ErrorCode:    0,
+				ID:          "validation-001",
+				ProbeID:     "validation-probe-001",
+				Target:      createTestTarget("validation-target-001", "8.8.8.8"),
+				RTT:         25000 * time.Microsecond,
+				Success:     true,
+				TTL:         64,
+				PacketSize:  56,
+				SourceIP:    net.ParseIP("192.168.1.100"),
+				Timestamp:   time.Now(),
+				ErrorCode:   types.ICMPErrNoError,
 				ErrorMessage: "",
 			},
 			expectError: false,
@@ -188,6 +148,7 @@ func TestOpenTelemetryMetricsValidation(t *testing.T) {
 		{
 			name: "failed measurement",
 			measurement: &types.MeasurementData{
+				ID:          "validation-002",
 				ProbeID:       "validation-probe-001",
 				Target:        createTestTarget("validation-target-002", "192.0.2.1"),
 				RTT:           0,
@@ -196,7 +157,7 @@ func TestOpenTelemetryMetricsValidation(t *testing.T) {
 				PacketSize:    0,
 				SourceIP:      nil,
 				Timestamp:     time.Now(),
-				ErrorCode:     2,
+				ErrorCode:     types.ICMPErrUnreachable,
 				ErrorMessage:  "Destination unreachable",
 			},
 			expectError: false,
@@ -204,15 +165,16 @@ func TestOpenTelemetryMetricsValidation(t *testing.T) {
 		{
 			name: "zero RTT measurement",
 			measurement: &types.MeasurementData{
-				ProbeID:      "validation-probe-001",
-				Target:       createTestTarget("validation-target-003", "127.0.0.1"),
-				RTT:          0,
-				Success:      true,
-				TTL:          64,
-				PacketSize:   56,
-				SourceIP:     net.ParseIP("127.0.0.1"),
-				Timestamp:    time.Now(),
-				ErrorCode:    0,
+				ID:          "validation-003",
+				ProbeID:     "validation-probe-001",
+				Target:      createTestTarget("validation-target-003", "127.0.0.1"),
+				RTT:         0,
+				Success:     true,
+				TTL:         64,
+				PacketSize:  56,
+				SourceIP:    net.ParseIP("127.0.0.1"),
+				Timestamp:   time.Now(),
+				ErrorCode:   types.ICMPErrNoError,
 				ErrorMessage: "",
 			},
 			expectError: false,
@@ -240,9 +202,9 @@ func TestOpenTelemetryMetricsValidation(t *testing.T) {
 func TestOpenTelemetryTracingValidation(t *testing.T) {
 	ctx := context.Background()
 
-	// Initialize with noop provider for testing
-	otel.SetMeterProvider(noop.NewMeterProvider())
-	otel.SetTracerProvider(noop.NewTracerProvider())
+	// Initialize with default provider
+	otel.SetMeterProvider(nil)
+	otel.SetTracerProvider(nil)
 
 	tracerProvider := telemetry.NewOTELTracerProvider()
 
@@ -260,15 +222,16 @@ func TestOpenTelemetryTracingValidation(t *testing.T) {
 
 		// Create test measurement
 		measurement := &types.MeasurementData{
-			ProbeID:      probeID,
-			Target:       createTestTarget(targetID, "192.0.2.1"),
-			RTT:          5000 * time.Microsecond,
-			Success:      false,
-			TTL:          64,
-			PacketSize:   56,
-			SourceIP:     net.ParseIP("192.168.1.1"),
-			Timestamp:    time.Now(),
-			ErrorCode:    3,
+			ID:          measurementID,
+			ProbeID:     probeID,
+			Target:      createTestTarget(targetID, "192.0.2.1"),
+			RTT:         5000 * time.Microsecond,
+			Success:     false,
+			TTL:         64,
+			PacketSize:  56,
+			SourceIP:    net.ParseIP("192.168.1.1"),
+			Timestamp:   time.Now(),
+			ErrorCode:   types.ICMPErrNoRoute,
 			ErrorMessage: "Network unreachable",
 		}
 
@@ -325,20 +288,16 @@ func TestOpenTelemetryEndToEndFlow(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Initialize with noop provider for testing
-	otel.SetMeterProvider(noop.NewMeterProvider())
-	otel.SetTracerProvider(noop.NewTracerProvider())
+	// Initialize with default provider
+	otel.SetMeterProvider(nil)
+	otel.SetTracerProvider(nil)
 
 	// Create telemetry components
 	meterProvider := telemetry.NewOTELMeterProvider()
 	tracerProvider := telemetry.NewOTELTracerProvider()
 
 	// Initialize meter provider
-	err := meterProvider.Initialize(&types.MetricsConfig{
-		Enabled:    true,
-		Histograms: true,
-		Counters:   true,
-	})
+	err := meterProvider.Initialize(nil)
 	if err != nil {
 		t.Fatalf("Failed to initialize meter provider: %v", err)
 	}
@@ -357,15 +316,16 @@ func TestOpenTelemetryEndToEndFlow(t *testing.T) {
 
 	// Create successful measurement
 	measurement := &types.MeasurementData{
-		ProbeID:      probeID,
-		Target:       target,
-		RTT:          15000 * time.Microsecond,
-		Success:      true,
-		TTL:          64,
-		PacketSize:   56,
-		SourceIP:     net.ParseIP("192.168.1.100"),
-		Timestamp:    time.Now(),
-		ErrorCode:    0,
+		ID:          "e2e-001",
+		ProbeID:     probeID,
+		Target:      target,
+		RTT:         15000 * time.Microsecond,
+		Success:     true,
+		TTL:         64,
+		PacketSize:  56,
+		SourceIP:    net.ParseIP("192.168.1.100"),
+		Timestamp:   time.Now(),
+		ErrorCode:   types.ICMPErrNoError,
 		ErrorMessage: "",
 	}
 
@@ -396,19 +356,6 @@ func TestOpenTelemetryEndToEndFlow(t *testing.T) {
 	meterProvider.RecordError("system", "normal operation", probeID)
 	meterProvider.RecordProbeUptime(3600) // 1 hour uptime
 
-	// Create probe metrics
-	probeMetrics := &types.ProbeMetrics{
-		CPUUsage:              12.5,
-		MemoryUsage:           128 * 1024 * 1024, // 128 MB
-		NetworkBytes:          512 * 1024,        // 512 KB
-		MeasurementsPerSecond: 8.2,
-	}
-
-	err = meterProvider.RecordProbeMetrics(probeMetrics)
-	if err != nil {
-		t.Errorf("Failed to record probe metrics: %v", err)
-	}
-
 	// Shutdown telemetry
 	err = meterProvider.Shutdown(ctx)
 	if err != nil {
@@ -420,34 +367,29 @@ func TestOpenTelemetryEndToEndFlow(t *testing.T) {
 
 // BenchmarkOpenTelemetryPerformance benchmarks OpenTelemetry performance
 func BenchmarkOpenTelemetryMeasurementRecording(b *testing.B) {
-	ctx := context.Background()
-
-	// Initialize with noop provider for benchmarking
-	otel.SetMeterProvider(noop.NewMeterProvider())
-	otel.SetTracerProvider(noop.NewTracerProvider())
+	// Initialize with default provider
+	otel.SetMeterProvider(nil)
+	otel.SetTracerProvider(nil)
 
 	meterProvider := telemetry.NewOTELMeterProvider()
 
-	err := meterProvider.Initialize(&types.MetricsConfig{
-		Enabled:    true,
-		Histograms: true,
-		Counters:   true,
-	})
+	err := meterProvider.Initialize(nil)
 	if err != nil {
 		b.Fatalf("Failed to initialize meter provider: %v", err)
 	}
 
 	target := createTestTarget("benchmark-target", "127.0.0.1")
 	measurement := &types.MeasurementData{
-		ProbeID:      "benchmark-probe",
-		Target:       target,
-		RTT:          1000 * time.Microsecond,
-		Success:      true,
-		TTL:          64,
-		PacketSize:   56,
-		SourceIP:     net.ParseIP("127.0.0.1"),
-		Timestamp:    time.Now(),
-		ErrorCode:    0,
+		ID:          "benchmark-001",
+		ProbeID:     "benchmark-probe",
+		Target:      target,
+		RTT:         1000 * time.Microsecond,
+		Success:     true,
+		TTL:         64,
+		PacketSize:  56,
+		SourceIP:    net.ParseIP("127.0.0.1"),
+		Timestamp:   time.Now(),
+		ErrorCode:   types.ICMPErrNoError,
 		ErrorMessage: "",
 	}
 
@@ -465,9 +407,9 @@ func BenchmarkOpenTelemetryMeasurementRecording(b *testing.B) {
 func BenchmarkOpenTelemetrySpanCreation(b *testing.B) {
 	ctx := context.Background()
 
-	// Initialize with noop provider for benchmarking
-	otel.SetMeterProvider(noop.NewMeterProvider())
-	otel.SetTracerProvider(noop.NewTracerProvider())
+	// Initialize with default provider
+	otel.SetMeterProvider(nil)
+	otel.SetTracerProvider(nil)
 
 	tracerProvider := telemetry.NewOTELTracerProvider()
 
@@ -477,15 +419,16 @@ func BenchmarkOpenTelemetrySpanCreation(b *testing.B) {
 		spanCtx, span := tracerProvider.StartMeasurementSpan(ctx, "benchmark-measurement", "benchmark-probe", "benchmark-target")
 		
 		measurement := &types.MeasurementData{
-			ProbeID:      "benchmark-probe",
-			Target:       createTestTarget("benchmark-target", "127.0.0.1"),
-			RTT:          1000 * time.Microsecond,
-			Success:      true,
-			TTL:          64,
-			PacketSize:   56,
-			SourceIP:     net.ParseIP("127.0.0.1"),
-			Timestamp:    time.Now(),
-			ErrorCode:    0,
+			ID:          "benchmark-span-001",
+			ProbeID:     "benchmark-probe",
+			Target:      createTestTarget("benchmark-target", "127.0.0.1"),
+			RTT:         1000 * time.Microsecond,
+			Success:     true,
+			TTL:         64,
+			PacketSize:  56,
+			SourceIP:    net.ParseIP("127.0.0.1"),
+			Timestamp:   time.Now(),
+			ErrorCode:   types.ICMPErrNoError,
 			ErrorMessage: "",
 		}
 		
@@ -495,8 +438,8 @@ func BenchmarkOpenTelemetrySpanCreation(b *testing.B) {
 
 // Helper functions
 
-func createTestTarget(id, address string) *types.NetworkTarget {
-	return &types.NetworkTarget{
+func createTestTarget(id, address string) types.NetworkTarget {
+	return types.NetworkTarget{
 		ID:      id,
 		Address: net.ParseIP(address),
 		Timeout: 5 * time.Second,
