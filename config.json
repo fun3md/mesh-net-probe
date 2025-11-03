@@ -1,0 +1,29 @@
+{
+  "name": "Windows ICMP Test Configuration",
+  "version": 1,
+  "network": {
+    "buffer_size": 2048,
+    "ttl": 64
+  },
+  "targets": [
+    {
+      "id": "google_dns",
+      "address": "8.8.8.8",
+      "enabled": true,
+      "timeout": 5
+    },
+    {
+      "id": "cloudflare_dns",
+      "address": "1.1.1.1",
+      "enabled": true,
+      "timeout": 5
+    }
+  ],
+  "telemetry": {
+    "enable_metrics": true,
+    "enable_tracing": true,
+    "enable_logging": true,
+    "log_level": "info",
+    "log_format": "text"
+  }
+}

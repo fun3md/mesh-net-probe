@@ -8,7 +8,8 @@ import (
 	"github.com/mesh-net-probe/probe/internal/platform"
 )
 
-func main() {
+// TestPlatformDetection tests cross-platform detection capabilities
+func TestPlatformDetection() {
 	// Test platform detection
 	platformInfo, err := platform.DetectPlatform()
 	if err != nil {

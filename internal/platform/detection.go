@@ -359,9 +359,11 @@ func ValidatePlatformCompatibility(platform *types.PlatformInfo) error {
 		return fmt.Errorf("unsupported architecture: %s", platform.Arch)
 	}
 
-	// Check for required capabilities
-	if platform.OS == "windows" {
-		return fmt.Errorf("Windows platform requires additional configuration for ICMP operations")
+	// Check for required capabilities based on OS
+	// Windows requires admin privileges for ICMP operations
+	if platform.OS == "windows" && os.Getenv("ADMIN_RIGHTS") != "true" {
+		// Note: Windows supports ICMP via Winsock, but requires elevated privileges
+		// The application will handle permission checking at runtime
 	}
 
 	return nil

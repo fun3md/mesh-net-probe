@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -47,7 +48,6 @@ type ProbeApplication struct {
 	platform  *types.PlatformInfo
 }
 
-// NewProbeApplication creates a new probe application instance
 func NewProbeApplication() *ProbeApplication {
 	ctx, cancel := context.WithCancel(context.Background())
 	
@@ -94,14 +94,10 @@ func (app *ProbeApplication) Initialize() error {
 	}
 	
 	// Load configuration
-	app.config = createDefaultConfiguration()
+	app.config = loadConfiguration()
 	
 	// Generate probe ID if not set
-	if probeID == "" {
-		app.probeID = generateProbeID()
-	} else {
-		app.probeID = probeID
-	}
+	app.probeID = generateProbeID()
 	
 	return nil
 }
@@ -154,11 +150,11 @@ func (app *ProbeApplication) runDaemon() error {
 }
 
 func (app *ProbeApplication) runInteractive() error {
-	fmt.Printf("Starting interactive mode\n")
+	fmt.Printf("Starting interactive mode with configured targets\n")
 	
 	targets := toPointerSlice(app.config.Targets)
 	if len(targets) == 0 {
-		return fmt.Errorf("no targets configured")
+		return fmt.Errorf("no targets configured in config file")
 	}
 	
 	// Perform measurements for each target
@@ -241,15 +237,16 @@ func generateProbeID() string {
 	return "probe_" + fmt.Sprintf("%x", hash[:8])
 }
 
-func createDefaultConfiguration() *types.Configuration {
-	return &types.Configuration{
+func loadConfiguration() *types.Configuration {
+	// Start with default configuration
+	config := &types.Configuration{
 		Name:      "Default Configuration",
 		Version:   1,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		
 		Network: &types.NetworkConfig{
-			BufferSize: 8192,
+			BufferSize: 2048,
 			TTL:        64,
 		},
 		
@@ -261,6 +258,89 @@ func createDefaultConfiguration() *types.Configuration {
 			LogFormat:    "text",
 		},
 	}
+	
+	// Try to load from config file if specified
+	if configFile != "" {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			fmt.Printf("Warning: Could not load config file %s: %v\n", configFile, err)
+			return applyLogLevelOverride(config)
+		}
+		
+		// Parse the JSON config file
+		var fileConfig map[string]interface{}
+		if err := json.Unmarshal(data, &fileConfig); err != nil {
+			fmt.Printf("Warning: Could not parse config file %s: %v\n", configFile, err)
+			return applyLogLevelOverride(config)
+		}
+		
+		// Extract targets from config
+		if targetsSlice, ok := fileConfig["targets"].([]interface{}); ok {
+			config.Targets = make([]types.NetworkTarget, 0, len(targetsSlice))
+			
+			for i, targetData := range targetsSlice {
+				targetMap, ok := targetData.(map[string]interface{})
+				if !ok {
+					fmt.Printf("Warning: Invalid target data at index %d\n", i)
+					continue
+				}
+				
+				target := types.NetworkTarget{
+					ID:      fmt.Sprintf("target_%d", i+1),
+					Enabled: true,
+					Timeout: 5 * time.Second,
+				}
+				
+				// Parse address
+				if addrStr, ok := targetMap["address"].(string); ok {
+					target.Address = parseIP(addrStr)
+				}
+				
+				// Parse ID
+				if idStr, ok := targetMap["id"].(string); ok {
+					target.ID = idStr
+				}
+				
+				// Parse enabled flag
+				if enabled, ok := targetMap["enabled"].(bool); ok {
+					target.Enabled = enabled
+				}
+				
+				// Parse timeout
+				if timeoutSec, ok := targetMap["timeout"].(float64); ok {
+					target.Timeout = time.Duration(timeoutSec) * time.Second
+				}
+				
+				config.Targets = append(config.Targets, target)
+			}
+			
+			fmt.Printf("Loaded %d targets from configuration\n", len(config.Targets))
+		}
+		
+		// Extract network config
+		if networkMap, ok := fileConfig["network"].(map[string]interface{}); ok {
+			if bufferSize, ok := networkMap["buffer_size"].(float64); ok {
+				config.Network.BufferSize = int(bufferSize)
+			}
+		}
+		
+		fmt.Printf("Loaded configuration from %s\n", configFile)
+	}
+	
+	return applyLogLevelOverride(config)
+}
+
+func applyLogLevelOverride(config *types.Configuration) *types.Configuration {
+	// Apply command line log level override
+	if logLevel != "" && config.Telemetry != nil {
+		config.Telemetry.LogLevel = logLevel
+		if verbose {
+			fmt.Printf("Log level set to: %s (verbose mode)\n", logLevel)
+		} else {
+			fmt.Printf("Log level set to: %s\n", logLevel)
+		}
+	}
+	return config
 }
 
 // Command definitions
@@ -297,11 +377,47 @@ var measureCmd = &cobra.Command{
 			return fmt.Errorf("at least one target is required")
 		}
 		
+		// Create app with proper configuration loading
 		app := NewProbeApplication()
-		if err := app.Initialize(); err != nil {
-			return err
+		
+		// Load configuration first
+		app.config = loadConfiguration()
+		
+		// Initialize platform
+		var err error
+		app.platform, err = platform.DetectPlatform()
+		if err != nil {
+			return fmt.Errorf("platform detection failed: %w", err)
 		}
-		defer app.Shutdown()
+		
+		// Validate platform compatibility
+		if err := platform.ValidatePlatformCompatibility(app.platform); err != nil {
+			return fmt.Errorf("platform validation failed: %w", err)
+		}
+		
+		// Initialize timing engine
+		app.timing = icmp.NewTimingEngine()
+		if err := app.timing.Initialize(); err != nil {
+			return fmt.Errorf("failed to initialize timing: %w", err)
+		}
+		
+		// Initialize ICMP engine
+		app.engine = icmp.NewEngine()
+		
+		// Configure ICMP engine with network settings from config
+		if app.config.Network != nil {
+			networkConfig := &types.NetworkConfig{
+				BufferSize: app.config.Network.BufferSize,
+				TTL:        app.config.Network.TTL,
+			}
+			
+			if err := app.engine.Initialize(app.ctx, networkConfig); err != nil {
+				return fmt.Errorf("failed to initialize ICMP engine: %w", err)
+			}
+		}
+		
+		// Generate probe ID
+		app.probeID = generateProbeID()
 		
 		return app.performMeasurements(args)
 	},
@@ -311,9 +427,10 @@ func (app *ProbeApplication) performMeasurements(targets []string) error {
 	// Convert targets to NetworkTarget format
 	networkTargets := make([]*types.NetworkTarget, len(targets))
 	for i, target := range targets {
+		parsedIP := parseIP(target)
 		networkTargets[i] = &types.NetworkTarget{
-			ID:      fmt.Sprintf("target_%d", i+1),
-			Address: parseIP(target),
+			ID:      fmt.Sprintf("cmd_target_%d", i+1),
+			Address: parsedIP,
 			Enabled: true,
 			Timeout: 5 * time.Second,
 		}
@@ -328,11 +445,18 @@ func (app *ProbeApplication) performMeasurements(targets []string) error {
 }
 
 func parseIP(target string) net.IP {
-	// Parse IP address or hostname
+	// Try to parse as IP address first
 	if ip := net.ParseIP(target); ip != nil {
 		return ip
 	}
+	
+	// Try to resolve as hostname
+	if host, err := net.LookupHost(target); err == nil && len(host) > 0 {
+		return net.ParseIP(host[0])
+	}
+	
 	// Fallback to loopback if parsing fails
+	fmt.Printf("Warning: Could not resolve '%s', using 127.0.0.1\n", target)
 	return net.ParseIP("127.0.0.1")
 }
 

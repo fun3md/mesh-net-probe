@@ -133,20 +133,4 @@ func ProfileLatencyMeasurement(target string, samples int) {
 	fmt.Println("Performance profiling completed. Check profiles/ directory for results.")
 }
 
-func main() {
-	// Example usage
-	if len(os.Args) > 1 {
-		target := os.Args[1]
-		samples := 100
-		if len(os.Args) > 2 {
-			if s, err := fmt.Sscanf(os.Args[2], "%d", &samples); err != nil || s != 1 {
-				fmt.Printf("Invalid samples count: %s\n", os.Args[2])
-				os.Exit(1)
-			}
-		}
-		ProfileLatencyMeasurement(target, samples)
-	} else {
-		fmt.Println("Usage: profiler <target> [samples]")
-		os.Exit(1)
-	}
-}
+
