@@ -35,6 +35,24 @@ services:
       - "traefik.http.routers.admin-web-dev.port=8080"
       - "traefik.http.services.admin-web-dev.loadbalancer.server.port=8080"
 
+  # Frontend web interface (separate container)
+  frontend-dev:
+    image: mesh-probe-frontend:latest
+    container_name: frontend-dev
+    ports:
+      - "3001:80"
+    environment:
+      - NGINX_HOST=localhost
+      - NGINX_PORT=80
+    networks:
+      - mesh-probe-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Optional: Redis for session storage and caching
   redis-dev:
     image: redis:7-alpine

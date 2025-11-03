@@ -20,7 +20,7 @@
     "enable_access_logging": true
   },
   "cors": {
-    "enabled": true,
+    "enabled": false,
     "allowed_origins": [
       "http://localhost:3000",
       "http://localhost:5173",

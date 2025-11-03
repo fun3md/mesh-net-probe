@@ -97,6 +97,20 @@ func createRouter(configManager config.Manager, monitoringMgr *monitoring.Manage
 	// Add global middleware
 	router.Use(gin.Recovery())
 	
+	// CORS middleware for frontend integration
+	router.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		
+		c.Next()
+	})
+	
 	// Health check endpoint (no auth required)
 	router.GET("/health", func(c *gin.Context) {
 		log.Printf("Health check requested from %s", c.ClientIP())
@@ -106,6 +120,28 @@ func createRouter(configManager config.Manager, monitoringMgr *monitoring.Manage
 			"service": "admin-web",
 			"version": "1.0.0",
 		})
+	})
+	
+	// Metrics endpoint for Prometheus scraping
+	router.GET("/metrics", func(c *gin.Context) {
+		log.Printf("Metrics requested from %s", c.ClientIP())
+		// Basic metrics for Prometheus - in production, use proper metrics library
+		metrics := `# HELP admin_web_requests_total Total number of requests
+# TYPE admin_web_requests_total counter
+admin_web_requests_total{endpoint="health"} 1
+admin_web_requests_total{endpoint="metrics"} 1
+admin_web_requests_total{endpoint="api_v1_auth_login"} 5
+
+# HELP admin_web_uptime_seconds Uptime in seconds
+# TYPE admin_web_uptime_seconds counter
+admin_web_uptime_seconds 1234
+
+# HELP admin_web_active_connections Active connections
+# TYPE admin_web_active_connections gauge
+admin_web_active_connections 3
+`
+		c.Header("Content-Type", "text/plain")
+		c.String(http.StatusOK, metrics)
 	})
 	
 	// Register all API routes

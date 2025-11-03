@@ -13,9 +13,9 @@ import (
 )
 
 type Middleware struct {
-	logger        logger.Logger
-	mu            sync.RWMutex
-	rateLimitMap  map[string]time.Time
+	logger         logger.Logger
+	mu             sync.RWMutex
+	rateLimitMap   map[string]time.Time
 	allowedOrigins []string
 }
 
@@ -32,9 +32,9 @@ func NewMiddleware() *Middleware {
 		logger:       logger.GetGlobalLogger(),
 		rateLimitMap: make(map[string]time.Time),
 		allowedOrigins: []string{
-			"http://localhost:3000", // React dev server
-			"http://localhost:5173", // Vite dev server
-			"https://localhost:3000", // HTTPS dev server
+			"http://localhost:3001",  // React dev server
+			"http://localhost:5173",  // Vite dev server
+			"https://localhost:3001", // HTTPS dev server
 		},
 	}
 }
@@ -221,9 +221,9 @@ func RequireRole(role string) gin.HandlerFunc {
 
 		if userRole != role && userRole != "admin" {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error": "insufficient permissions",
+				"error":    "insufficient permissions",
 				"required": role,
-				"actual": userRole,
+				"actual":   userRole,
 			})
 			c.Abort()
 			return
@@ -261,9 +261,9 @@ func RequireOperator() gin.HandlerFunc {
 
 		if !hasPermission {
 			c.JSON(http.StatusForbidden, gin.H{
-				"error": "insufficient permissions",
+				"error":    "insufficient permissions",
 				"required": "operator or admin",
-				"actual": userRole,
+				"actual":   userRole,
 			})
 			c.Abort()
 			return
