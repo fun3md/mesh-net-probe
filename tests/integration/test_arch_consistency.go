@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"net"
 	"runtime"
 	"testing"
 	"time"
@@ -355,9 +356,6 @@ func benchmarkTimingOperations(t *testing.T, engine *icmp.Engine) benchmarkResul
 	elapsed := time.Since(start)
 	operationsPerSecond := float64(iterations) / elapsed.Seconds()
 	
-	// Calculate precision based on success rate
-	successRate := float64(successCount) / float64(iterations)
-	
 	return benchmarkResults{
 		operationsPerSecond: operationsPerSecond,
 		nanosecondPrecision: int64(elapsed.Nanoseconds() / int64(iterations)),
@@ -366,33 +364,51 @@ func benchmarkTimingOperations(t *testing.T, engine *icmp.Engine) benchmarkResul
 
 // BenchmarkCrossArchitecturePerformance benchmarks performance across different architectures
 func BenchmarkCrossArchitectureTiming(b *testing.B) {
-	timing := icmp.NewTimingEngine()
-	
-	if err := timing.Initialize(); err != nil {
-		b.Fatalf("Failed to initialize timing engine: %v", err)
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(1*time.Second),
+		icmp.WithBufferSize(4096),
+	)
+	if err != nil {
+		b.Fatalf("Failed to create ICMP engine: %v", err)
 	}
+	defer engine.Close()
 	
 	// Platform information
 	platformInfo, _ := platform.DetectPlatform()
-	b.Logf("Benchmarking timing operations on %s/%s", platformInfo.OS, platformInfo.Arch)
+	b.Logf("Benchmarking ICMP operations on %s/%s", platformInfo.OS, platformInfo.Arch)
 	
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		b.Fatal("Invalid target IP")
+	}
+	
+	ctx := context.Background()
 	b.ResetTimer()
 	
 	for i := 0; i < b.N; i++ {
-		_ = timing.GetCurrentTime()
+		_, _ = engine.Ping(ctx, target)
 	}
 }
 
-func BenchmarkCrossArchitectureCalibration(b *testing.B) {
-	timing := icmp.NewTimingEngine()
+func BenchmarkCrossArchitectureBatch(b *testing.B) {
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(1*time.Second),
+		icmp.WithBufferSize(4096),
+	)
+	if err != nil {
+		b.Fatalf("Failed to create ICMP engine: %v", err)
+	}
+	defer engine.Close()
 	
-	if err := timing.Initialize(); err != nil {
-		b.Fatalf("Failed to initialize timing engine: %v", err)
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		b.Fatal("Invalid target IP")
 	}
 	
+	ctx := context.Background()
 	b.ResetTimer()
 	
 	for i := 0; i < b.N; i++ {
-		_ = timing.Calibrate()
+		_, _ = engine.PingBatch(ctx, target, 5)
 	}
 }

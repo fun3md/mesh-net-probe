@@ -25,22 +25,34 @@ func TestCrossPlatformICMPEngine(t *testing.T) {
 	t.Logf("Testing on platform: %s/%s (%s)", platformInfo.OS, platformInfo.Arch, runtime.Version())
 	
 	// Initialize ICMP engine for current platform
-	engine := icmp.NewEngine()
-	config := createPlatformSpecificConfig(platformInfo)
-	
-	err = engine.Initialize(ctx, config)
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(5*time.Second),
+		icmp.WithBufferSize(65535),
+	)
 	if err != nil {
 		t.Skipf("ICMP engine initialization failed on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
 	}
-	defer engine.Close(ctx)
+	defer engine.Close()
 	
-	// Test engine statistics
-	stats := engine.GetStats()
-	if stats == nil {
-		t.Error("Engine statistics are nil on " + platformInfo.OS + "/" + platformInfo.Arch)
+	// Test engine functionality
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		t.Error("Invalid target IP")
+		return
 	}
 	
-	t.Logf("Platform %s/%s: Engine stats collected successfully", platformInfo.OS, platformInfo.Arch)
+	measurement, err := engine.Ping(ctx, target)
+	if err != nil {
+		t.Errorf("ICMP ping failed on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
+		return
+	}
+	
+	if measurement == nil {
+		t.Error("Measurement result is nil on " + platformInfo.OS + "/" + platformInfo.Arch)
+		return
+	}
+	
+	t.Logf("Platform %s/%s: Engine functionality verified successfully", platformInfo.OS, platformInfo.Arch)
 }
 
 // TestCrossPlatformTimingEngine tests timing precision across different platforms
@@ -52,19 +64,20 @@ func TestCrossPlatformTimingEngine(t *testing.T) {
 	
 	t.Logf("Testing timing engine on: %s/%s", platformInfo.OS, platformInfo.Arch)
 	
-	timing := icmp.NewTimingEngine()
-	
-	// Initialize timing engine
-	err = timing.Initialize()
+	// Get platform capabilities for timing information
+	capabilities, err := platform.ValidateCapabilities()
 	if err != nil {
-		t.Errorf("Timing engine initialization failed on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
+		t.Errorf("Failed to get capabilities on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
 		return
 	}
 	
-	// Test timing precision
-	precision, err := timing.ValidatePrecision()
+	t.Logf("Platform %s/%s: Can measure = %t, Max precision = %s",
+		platformInfo.OS, platformInfo.Arch, capabilities.CanMeasure, capabilities.MaxPrecision)
+	
+	// Get optimal timing precision
+	precision, err := platform.GetOptimalTimingPrecision()
 	if err != nil {
-		t.Errorf("Precision validation failed on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
+		t.Errorf("Failed to get timing precision on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
 		return
 	}
 	
@@ -73,22 +86,17 @@ func TestCrossPlatformTimingEngine(t *testing.T) {
 		return
 	}
 	
-	t.Logf("Platform %s/%s: Timing precision = %s", platformInfo.OS, platformInfo.Arch, precision)
+	t.Logf("Platform %s/%s: Optimal timing precision = %s", platformInfo.OS, platformInfo.Arch, precision)
 	
-	// Test timing resolution
-	resolution := timing.GetTimerResolution()
-	if resolution <= 0 {
-		t.Errorf("Invalid timer resolution on %s/%s: %v", platformInfo.OS, platformInfo.Arch, resolution)
+	// Get platform statistics
+	stats, err := platform.GetPlatformStats()
+	if err != nil {
+		t.Errorf("Failed to get platform stats on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
+		return
 	}
 	
-	// Test system information
-	systemInfo := timing.GetSystemInfo()
-	if systemInfo == nil {
-		t.Errorf("System info is nil on %s/%s", platformInfo.OS, platformInfo.Arch)
-	} else {
-		t.Logf("Platform %s/%s: Timer resolution = %v, CPU cores = %d", 
-			platformInfo.OS, platformInfo.Arch, systemInfo.TimerResolution, systemInfo.CPULogicalCores)
-	}
+	t.Logf("Platform %s/%s: CPU count = %d, Go routines = %d",
+		platformInfo.OS, platformInfo.Arch, stats.CPUCount, stats.GoRoutines)
 }
 
 // TestCrossPlatformMeasurementConsistency tests measurement consistency across platforms
@@ -103,26 +111,28 @@ func TestCrossPlatformMeasurementConsistency(t *testing.T) {
 		t.Fatalf("Failed to detect platform: %v", err)
 	}
 	
-	engine := icmp.NewEngine()
-	config := createPlatformSpecificConfig(platformInfo)
-	
-	err = engine.Initialize(ctx, config)
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(5*time.Second),
+		icmp.WithBufferSize(65535),
+	)
 	if err != nil {
 		t.Skipf("Cannot initialize ICMP engine on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
 	}
-	defer engine.Close(ctx)
+	defer engine.Close()
 	
 	// Test with loopback address for consistency
-	target := &types.NetworkTarget{
-		ID:      "consistency_test",
-		Address: net.ParseIP("127.0.0.1"),
-		Timeout: 2 * time.Second,
-		Enabled: true,
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		t.Error("Invalid target IP")
+		return
 	}
 	
-	measurements := make([]*types.MeasurementData, 5)
-	for i := 0; i < 5; i++ {
-		measurement, err := engine.Measure(ctx, target)
+	successCount := 0
+	var totalRTT time.Duration
+	const iterations = 5
+	
+	for i := 0; i < iterations; i++ {
+		measurement, err := engine.Ping(ctx, target)
 		if err != nil {
 			t.Logf("Measurement %d failed on %s/%s: %v", i+1, platformInfo.OS, platformInfo.Arch, err)
 			continue
@@ -133,29 +143,23 @@ func TestCrossPlatformMeasurementConsistency(t *testing.T) {
 			continue
 		}
 		
-		measurements[i] = measurement
+		if measurement.RTT >= 0 {
+			successCount++
+			totalRTT += measurement.RTT
+		}
 		
 		// Log measurement details
-		t.Logf("Measurement %d on %s/%s: success=%v, rtt=%v", 
-			i+1, platformInfo.OS, platformInfo.Arch, measurement.Success, measurement.RTT)
+		t.Logf("Measurement %d on %s/%s: rtt=%v",
+			i+1, platformInfo.OS, platformInfo.Arch, measurement.RTT)
 		
 		// Small delay between measurements
 		time.Sleep(10 * time.Millisecond)
 	}
 	
 	// Analyze measurement consistency
-	successCount := 0
-	var totalRTT time.Duration
-	for _, m := range measurements {
-		if m != nil && m.Success {
-			successCount++
-			totalRTT += m.RTT
-		}
-	}
-	
-	successRate := float64(successCount) / float64(len(measurements))
-	if len(measurements) > 0 {
-		t.Logf("Platform %s/%s: Success rate = %.2f%%, Average RTT = %v", 
+	successRate := float64(successCount) / float64(iterations)
+	if successCount > 0 {
+		t.Logf("Platform %s/%s: Success rate = %.2f%%, Average RTT = %v",
 			platformInfo.OS, platformInfo.Arch, successRate*100, totalRTT/time.Duration(successCount))
 	}
 }
@@ -168,7 +172,7 @@ func TestPlatformCapabilities(t *testing.T) {
 	}
 	
 	// Test platform capabilities
-	capabilities, err := platform.GetCapabilities(platformInfo)
+	capabilities, err := platform.ValidateCapabilities()
 	if err != nil {
 		t.Errorf("Failed to get capabilities for %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
 		return
@@ -180,16 +184,18 @@ func TestPlatformCapabilities(t *testing.T) {
 	}
 	
 	t.Logf("Platform %s/%s capabilities:", platformInfo.OS, platformInfo.Arch)
-	t.Logf("  Precision: %s", capabilities.Precision)
-	t.Logf("  Capabilities: %v", capabilities.Capabilities)
+	t.Logf("  Can measure: %t", capabilities.CanMeasure)
+	t.Logf("  Max precision: %s", capabilities.MaxPrecision)
+	t.Logf("  Features: %v", capabilities.Features)
 	t.Logf("  Limitations: %v", capabilities.Limitations)
 	
-	// Validate platform compatibility
-	err = platform.ValidatePlatformCompatibility(platformInfo)
+	// Validate privilege requirements
+	needsPrivs, missingCaps, err := platform.CheckPrivilegeRequirements()
 	if err != nil {
-		t.Errorf("Platform %s/%s validation failed: %v", platformInfo.OS, platformInfo.Arch, err)
+		t.Errorf("Failed to check privileges on %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
 	} else {
-		t.Logf("Platform %s/%s validation passed", platformInfo.OS, platformInfo.Arch)
+		t.Logf("Platform %s/%s: Needs privileges = %t, Missing capabilities = %v",
+			platformInfo.OS, platformInfo.Arch, needsPrivs, missingCaps)
 	}
 }
 
@@ -200,33 +206,43 @@ func TestPlatformSpecificConfiguration(t *testing.T) {
 		t.Fatalf("Failed to detect platform: %v", err)
 	}
 	
-	// Get platform-specific configuration
-	config := platform.GetPlatformSpecificConfig(platformInfo)
+	// Get platform capabilities (updated method name)
+	capabilities, err := platform.ValidateCapabilities()
+	if err != nil {
+		t.Errorf("Failed to get platform capabilities for %s/%s: %v", platformInfo.OS, platformInfo.Arch, err)
+		return
+	}
 	
 	t.Logf("Platform %s/%s specific configuration:", platformInfo.OS, platformInfo.Arch)
-	for key, value := range config {
-		t.Logf("  %s: %v", key, value)
-	}
+	t.Logf("  Platform: %v", capabilities.Platform)
+	t.Logf("  Features: %v", capabilities.Features)
 	
-	// Validate expected configuration keys based on platform
+	// Basic platform-specific expectations
 	switch platformInfo.OS {
 	case "linux":
-		validateConfigKey(t, config, "use_raw_sockets", true)
-		validateConfigKey(t, config, "buffer_size", 8192)
+		if len(capabilities.Features) == 0 {
+			t.Errorf("Linux should have defined features")
+		}
 	case "darwin":
-		validateConfigKey(t, config, "use_raw_sockets", false)
-		validateConfigKey(t, config, "buffer_size", 4096)
+		if len(capabilities.Features) == 0 {
+			t.Errorf("macOS should have defined features")
+		}
 	case "windows":
-		validateConfigKey(t, config, "use_raw_sockets", false)
-		validateConfigKey(t, config, "buffer_size", 2048)
+		if len(capabilities.Features) == 0 {
+			t.Errorf("Windows should have defined features")
+		}
 	}
 	
-	// Validate architecture-specific settings
+	// Architecture-specific expectations
 	switch platformInfo.Arch {
 	case "arm64":
-		validateConfigKey(t, config, "optimize_for_arm", true)
+		if !capabilities.CanMeasure {
+			t.Errorf("ARM64 should support measurements")
+		}
 	case "amd64":
-		validateConfigKey(t, config, "optimize_for_x86", true)
+		if !capabilities.CanMeasure {
+			t.Errorf("AMD64 should support measurements")
+		}
 	}
 }
 
@@ -284,22 +300,12 @@ func TestPlatformOperatingSystemSupport(t *testing.T) {
 // Helper functions
 
 func createPlatformSpecificConfig(platformInfo *types.PlatformInfo) *types.NetworkConfig {
-	config := &types.NetworkConfig{
+	// Return a basic configuration - the ICMP engine uses functional options
+	// This function is kept for compatibility but not used in the updated API
+	return &types.NetworkConfig{
 		BufferSize: 4096,
 		TTL:        64,
 	}
-	
-	// Get platform-specific adjustments
-	platformConfig := platform.GetPlatformSpecificConfig(platformInfo)
-	
-	// Apply platform-specific settings
-	if bufferSize, ok := platformConfig["buffer_size"]; ok {
-		if bs, ok := bufferSize.(int); ok {
-			config.BufferSize = bs
-		}
-	}
-	
-	return config
 }
 
 func validateConfigKey(t *testing.T, config map[string]interface{}, key string, expectedValue interface{}) {
@@ -331,33 +337,51 @@ func findValidSourceIPs() []net.IP {
 
 // BenchmarkCrossPlatformPerformance benchmarks performance across different platforms
 func BenchmarkCrossPlatformTiming(b *testing.B) {
-	timing := icmp.NewTimingEngine()
-	
-	if err := timing.Initialize(); err != nil {
-		b.Fatalf("Failed to initialize timing engine: %v", err)
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(1*time.Second),
+		icmp.WithBufferSize(4096),
+	)
+	if err != nil {
+		b.Fatalf("Failed to create ICMP engine: %v", err)
 	}
+	defer engine.Close()
 	
 	// Platform information
 	platformInfo, _ := platform.DetectPlatform()
-	b.Logf("Benchmarking timing on %s/%s", platformInfo.OS, platformInfo.Arch)
+	b.Logf("Benchmarking ICMP on %s/%s", platformInfo.OS, platformInfo.Arch)
 	
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		b.Fatal("Invalid target IP")
+	}
+	
+	ctx := context.Background()
 	b.ResetTimer()
 	
 	for i := 0; i < b.N; i++ {
-		_ = timing.GetCurrentTime()
+		_, _ = engine.Ping(ctx, target)
 	}
 }
 
-func BenchmarkCrossPlatformCalibration(b *testing.B) {
-	timing := icmp.NewTimingEngine()
+func BenchmarkCrossPlatformBatch(b *testing.B) {
+	engine, err := icmp.NewEngine(
+		icmp.WithTimeout(1*time.Second),
+		icmp.WithBufferSize(4096),
+	)
+	if err != nil {
+		b.Fatalf("Failed to create ICMP engine: %v", err)
+	}
+	defer engine.Close()
 	
-	if err := timing.Initialize(); err != nil {
-		b.Fatalf("Failed to initialize timing engine: %v", err)
+	target := net.ParseIP("127.0.0.1")
+	if target == nil {
+		b.Fatal("Invalid target IP")
 	}
 	
+	ctx := context.Background()
 	b.ResetTimer()
 	
 	for i := 0; i < b.N; i++ {
-		_ = timing.Calibrate()
+		_, _ = engine.PingBatch(ctx, target, 5)
 	}
 }
