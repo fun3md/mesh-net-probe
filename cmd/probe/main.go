@@ -31,6 +31,8 @@ var (
 	measureCount      int
 	continuousMode    bool
 	continuousInterval time.Duration
+	tracerouteMaxHops int
+	tracerouteDNSLookup bool
 )
 
 // ProbeApplication represents the main application instance
@@ -65,6 +67,7 @@ func NewProbeApplication() *ProbeApplication {
 func (app *ProbeApplication) Initialize() error {
 	// Initialize logger first
 	app.logger = logger.GetGlobalLogger()
+	app.logger.Info(app.ctx, "Initializing mesh probe application")
 	
 	// Initialize platform detection
 	var err error
@@ -103,6 +106,11 @@ func (app *ProbeApplication) Initialize() error {
 	// Generate probe ID if not set
 	app.probeID = generateProbeID()
 	
+	app.logger.Info(app.ctx, "Mesh probe application initialized",
+		"probe_id", app.probeID,
+		"platform", fmt.Sprintf("%s %s", app.platform.OS, app.platform.Arch),
+	)
+	
 	return nil
 }
 
@@ -134,11 +142,11 @@ func (app *ProbeApplication) Shutdown() error {
 // Runtime methods
 
 func (app *ProbeApplication) runDaemon() error {
-	fmt.Printf("Starting probe daemon mode\n")
+	app.logger.Info(app.ctx, "Starting probe daemon mode")
 	
 	targets := toPointerSlice(app.config.Targets)
 	if len(targets) == 0 {
-		fmt.Printf("Warning: No targets configured for daemon mode\n")
+		app.logger.Warn(app.ctx, "No targets configured for daemon mode")
 		return nil
 	}
 	
@@ -154,16 +162,18 @@ func (app *ProbeApplication) runDaemon() error {
 }
 
 func (app *ProbeApplication) runInteractive() error {
-	fmt.Printf("Starting interactive mode with configured targets\n")
+	app.logger.Info(app.ctx, "Starting interactive mode with configured targets")
 	
 	targets := toPointerSlice(app.config.Targets)
 	if len(targets) == 0 {
+		app.logger.Error(app.ctx, fmt.Errorf("no targets configured in config file"), "Configuration validation failed")
 		return fmt.Errorf("no targets configured in config file")
 	}
 	
 	// Perform measurements for each target
 	measurements, err := app.engine.MeasureBatch(app.ctx, targets)
 	if err != nil {
+		app.logger.Error(app.ctx, err, "Measurement batch failed")
 		return fmt.Errorf("measurement batch failed: %w", err)
 	}
 	
@@ -270,6 +280,7 @@ func (app *ProbeApplication) outputAveragedTextResults(stats []*TargetStats, tar
 	
 	for i, target := range targets {
 		s := stats[i]
+		// Use fmt.Printf for formatted results to maintain readability
 		fmt.Printf("%s -> %s:\n", target.ID, target.Address.String())
 		fmt.Printf("  Average: %v\n", s.Average)
 		fmt.Printf("  Min: %v\n", s.Min)
@@ -407,14 +418,14 @@ func loadConfiguration() *types.Configuration {
 	if configFile != "" {
 		data, err := os.ReadFile(configFile)
 		if err != nil {
-			fmt.Printf("Warning: Could not load config file %s: %v\n", configFile, err)
+			logger.GetGlobalLogger().Warn(nil, fmt.Sprintf("Could not load config file %s", configFile), "error", err)
 			return applyLogLevelOverride(config)
 		}
 		
 		// Parse the JSON config file
 		var fileConfig map[string]interface{}
 		if err := json.Unmarshal(data, &fileConfig); err != nil {
-			fmt.Printf("Warning: Could not parse config file %s: %v\n", configFile, err)
+			logger.GetGlobalLogger().Warn(nil, fmt.Sprintf("Could not parse config file %s", configFile), "error", err)
 			return applyLogLevelOverride(config)
 		}
 		
@@ -425,7 +436,7 @@ func loadConfiguration() *types.Configuration {
 			for i, targetData := range targetsSlice {
 				targetMap, ok := targetData.(map[string]interface{})
 				if !ok {
-					fmt.Printf("Warning: Invalid target data at index %d\n", i)
+					logger.GetGlobalLogger().Warn(nil, fmt.Sprintf("Invalid target data at index %d", i))
 					continue
 				}
 				
@@ -458,7 +469,7 @@ func loadConfiguration() *types.Configuration {
 				config.Targets = append(config.Targets, target)
 			}
 			
-			fmt.Printf("Loaded %d targets from configuration\n", len(config.Targets))
+			logger.GetGlobalLogger().Info(nil, fmt.Sprintf("Loaded %d targets from configuration", len(config.Targets)))
 		}
 		
 		// Extract network config
@@ -468,7 +479,7 @@ func loadConfiguration() *types.Configuration {
 			}
 		}
 		
-		fmt.Printf("Loaded configuration from %s\n", configFile)
+		logger.GetGlobalLogger().Info(nil, fmt.Sprintf("Loaded configuration from %s", configFile))
 	}
 	
 	return applyLogLevelOverride(config)
@@ -479,9 +490,9 @@ func applyLogLevelOverride(config *types.Configuration) *types.Configuration {
 	if logLevel != "" && config.Telemetry != nil {
 		config.Telemetry.LogLevel = logLevel
 		if verbose {
-			fmt.Printf("Log level set to: %s (verbose mode)\n", logLevel)
+			logger.GetGlobalLogger().Info(nil, fmt.Sprintf("Log level set to: %s (verbose mode)", logLevel))
 		} else {
-			fmt.Printf("Log level set to: %s\n", logLevel)
+			logger.GetGlobalLogger().Info(nil, fmt.Sprintf("Log level set to: %s", logLevel))
 		}
 	}
 	return config
@@ -512,13 +523,17 @@ var systemCmd = &cobra.Command{
 	},
 }
 
-var measureCmd = &cobra.Command{
-	Use:   "measure [target...]",
-	Short: "Perform ICMP measurements to specified targets",
-	Long:  "Perform single ICMP measurements to the specified target IP addresses or hostnames. If no targets are specified, uses targets from the configuration file.",
+var pingCmd = &cobra.Command{
+	Use:   "ping [target...]",
+	Short: "Perform ICMP ping measurements to specified targets",
+	Long:  "Perform single ICMP ping measurements to the specified target IP addresses or hostnames. If no targets are specified, uses targets from the configuration file.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Create app with proper configuration loading
 		app := NewProbeApplication()
+		
+		// Initialize logger first (avoid nil pointer in averaging)
+		app.logger = logger.GetGlobalLogger()
+		app.ctx = context.Background()
 		
 		// Load configuration first
 		app.config = loadConfiguration()
@@ -529,9 +544,9 @@ var measureCmd = &cobra.Command{
 			if len(app.config.Targets) == 0 {
 				return fmt.Errorf("no targets provided in CLI and no targets configured in config file")
 			}
-			fmt.Printf("Using %d targets from configuration\n", len(app.config.Targets))
+			logger.GetGlobalLogger().Info(nil, "Using targets from configuration", "targets_count", len(app.config.Targets))
 		} else {
-			fmt.Printf("Using %d targets from command line\n", len(args))
+			logger.GetGlobalLogger().Info(nil, "Using targets from command line", "targets_count", len(args))
 		}
 		
 		// Initialize platform
@@ -579,6 +594,109 @@ var measureCmd = &cobra.Command{
 	},
 }
 
+var tracerouteCmd = &cobra.Command{
+	Use:   "traceroute <target>",
+	Short: "Perform ICMP traceroute to trace the path to a target",
+	Long:  "Perform ICMP traceroute to trace the network path to the specified target IP address or hostname.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 1 {
+			return fmt.Errorf("exactly one target is required for traceroute")
+		}
+		
+		target := args[0]
+		return performTraceroute(target)
+	},
+}
+
+func performTraceroute(target string) error {
+	// Initialize logger
+	appLogger := logger.GetGlobalLogger()
+	
+	// Initialize app
+	app := NewProbeApplication()
+	app.logger = appLogger
+	app.ctx = context.Background()
+	
+	// Initialize platform
+	var err error
+	app.platform, err = platform.DetectPlatform()
+	if err != nil {
+		return fmt.Errorf("platform detection failed: %w", err)
+	}
+	
+	// Validate platform compatibility
+	if err := platform.ValidatePlatformCompatibility(app.platform); err != nil {
+		return fmt.Errorf("platform validation failed: %w", err)
+	}
+	
+	// Initialize ICMP engine with increasing TTL
+	app.engine = icmp.NewEngine()
+	
+	// Parse target IP
+	parsedIP := parseIP(target)
+	
+	fmt.Printf("traceroute to %s (%s), %d hops max\n", target, parsedIP.String(), tracerouteMaxHops)
+	
+	for ttl := 1; ttl <= tracerouteMaxHops; ttl++ {
+		fmt.Printf("%2d ", ttl)
+		
+		// Configure ICMP engine with current TTL
+		networkConfig := &types.NetworkConfig{
+			BufferSize: 2048,
+			TTL:        ttl,
+		}
+		
+		if err := app.engine.Initialize(app.ctx, networkConfig); err != nil {
+			fmt.Printf(" *\n")
+			continue
+		}
+		
+		// Create target for current TTL
+		networkTarget := &types.NetworkTarget{
+			ID:      "traceroute_target",
+			Address: parsedIP,
+			Enabled: true,
+			Timeout: 3 * time.Second,
+		}
+		
+		// Measure with current TTL
+		measurements, err := app.engine.MeasureBatch(app.ctx, []*types.NetworkTarget{networkTarget})
+		if err != nil {
+			fmt.Printf(" *\n")
+			continue
+		}
+		
+		if len(measurements) > 0 && measurements[0].Success {
+			measurement := measurements[0]
+			hopIP := measurement.DestIP.String()
+			
+			// Perform DNS lookup if enabled
+			if !tracerouteDNSLookup {
+				if hostnames, err := net.LookupAddr(hopIP); err == nil && len(hostnames) > 0 {
+					fmt.Printf("%s (%s) %v\n", hostnames[0], hopIP, measurement.RTT)
+				} else {
+					fmt.Printf("%s %v\n", hopIP, measurement.RTT)
+				}
+			} else {
+				fmt.Printf("%s %v\n", hopIP, measurement.RTT)
+			}
+			
+			// Check if we reached the destination
+			if measurement.DestIP.Equal(parsedIP) {
+				fmt.Printf("Trace complete.\n")
+				break
+			}
+		} else {
+			fmt.Printf(" *\n")
+		}
+		
+		// Small delay between hops
+		time.Sleep(500 * time.Millisecond)
+	}
+	
+	return nil
+}
+
 func (app *ProbeApplication) performMeasurements(targets []string) error {
 	// Convert targets to NetworkTarget format
 	networkTargets := make([]*types.NetworkTarget, len(targets))
@@ -611,7 +729,7 @@ func (app *ProbeApplication) performMeasurementLoop(targets []*types.NetworkTarg
 }
 
 func (app *ProbeApplication) performAveragedMeasurements(targets []*types.NetworkTarget) error {
-	fmt.Printf("Performing %d measurements per target for averaging\n", measureCount)
+	app.logger.Info(app.ctx, "Starting averaged measurements", "measurement_count", measureCount, "targets_count", len(targets))
 	
 	// For averaging, we need to run multiple rounds of measurements
 	// and calculate statistics
@@ -619,11 +737,12 @@ func (app *ProbeApplication) performAveragedMeasurements(targets []*types.Networ
 	
 	for round := 0; round < measureCount; round++ {
 		if verbose {
-			fmt.Printf("Measurement round %d/%d\n", round+1, measureCount)
+			app.logger.Info(app.ctx, "Performing measurement round", "round", round+1, "total_rounds", measureCount)
 		}
 		
 		measurements, err := app.engine.MeasureBatch(app.ctx, targets)
 		if err != nil {
+			app.logger.Error(app.ctx, err, "Measurement round failed", "round", round+1)
 			return fmt.Errorf("measurement round %d failed: %w", round+1, err)
 		}
 		
@@ -640,23 +759,23 @@ func (app *ProbeApplication) performAveragedMeasurements(targets []*types.Networ
 }
 
 func (app *ProbeApplication) performContinuousMeasurements(targets []*types.NetworkTarget) error {
-	fmt.Printf("Starting continuous measurements with %v interval\n", continuousInterval)
+	app.logger.Info(app.ctx, "Starting continuous measurements", "interval", continuousInterval, "targets_count", len(targets))
 	
 	measurementRound := 1
 	
 	for {
 		select {
 		case <-app.ctx.Done():
-			fmt.Printf("Continuous measurement stopped after %d rounds\n", measurementRound-1)
+			app.logger.Info(app.ctx, "Continuous measurement stopped", "final_round", measurementRound-1)
 			return nil
 		default:
 		}
 		
-		fmt.Printf("Continuous measurement round %d\n", measurementRound)
+		app.logger.Info(app.ctx, "Starting measurement round", "round", measurementRound)
 		
 		measurements, err := app.engine.MeasureBatch(app.ctx, targets)
 		if err != nil {
-			fmt.Printf("Continuous measurement round %d failed: %v\n", measurementRound, err)
+			app.logger.Error(app.ctx, err, "Continuous measurement round failed", "round", measurementRound)
 		} else {
 			app.outputResults(measurements)
 		}
@@ -668,7 +787,7 @@ func (app *ProbeApplication) performContinuousMeasurements(targets []*types.Netw
 		select {
 		case <-app.ctx.Done():
 			timer.Stop()
-			fmt.Printf("Continuous measurement stopped after %d rounds\n", measurementRound-1)
+			app.logger.Info(app.ctx, "Continuous measurement stopped", "final_round", measurementRound-1)
 			return nil
 		case <-timer.C:
 			// Continue to next measurement
@@ -698,7 +817,7 @@ func parseIP(target string) net.IP {
 	}
 	
 	// Fallback to loopback if parsing fails
-	fmt.Printf("Warning: Could not resolve '%s', using 127.0.0.1\n", target)
+	logger.GetGlobalLogger().Warn(nil, fmt.Sprintf("Could not resolve '%s', using 127.0.0.1", target), "target", target)
 	return net.ParseIP("127.0.0.1")
 }
 
@@ -806,7 +925,12 @@ func main() {
 	
 	// Add subcommands
 	rootCmd.AddCommand(systemCmd)
-	rootCmd.AddCommand(measureCmd)
+	rootCmd.AddCommand(pingCmd)
+	rootCmd.AddCommand(tracerouteCmd)
+	
+	// Traceroute specific flags
+	tracerouteCmd.Flags().IntVarP(&tracerouteMaxHops, "max-hops", "m", 30, "Maximum number of hops (default 30)")
+	tracerouteCmd.Flags().BoolVar(&tracerouteDNSLookup, "no-dns", false, "Do not resolve hostnames")
 	
 	// Set up error handling
 	if err := rootCmd.Execute(); err != nil {

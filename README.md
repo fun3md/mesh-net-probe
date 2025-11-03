@@ -1,460 +1,380 @@
-# Mesh Net Probe
+# Mesh Probe System
 
-A high-performance, cross-platform ICMP measurement tool that automatically adapts to Windows, Linux, and macOS on x86_64 and ARM64 architectures with automatic optimization for each platform.
+A high-precision ICMP measurement probe with statistical averaging and continuous monitoring capabilities, designed for cross-platform operation with Windows, Linux, and macOS support.
 
-## 🚀 Quick Start
+## 🚀 Features
 
-### Platform Support
+- **Single Measurements**: Precise ICMP ping measurements with microsecond precision
+- **Statistical Averaging**: Average multiple measurements with min, max, and standard deviation
+- **Continuous Monitoring**: Real-time monitoring with configurable intervals
+- **Cross-Platform**: Automatic adaptation for Windows, Linux, and macOS
+- **Multiple Output Formats**: Both human-readable text and structured JSON
+- **Configuration-Driven**: JSON-based configuration with CLI override support
 
-| Platform | Architecture | Support Level | Key Features |
-|----------|-------------|---------------|--------------|
-| **Windows** | x86_64, ARM64 | ✅ Full | Admin privileges, Winsock, AVX2/NEON |
-| **Linux** | x86_64, ARM64, ARM | ✅ Full | Raw sockets, CAP_NET_RAW, All SIMD |
-| **macOS** | x86_64, ARM64 | ✅ Full | BPF, System permissions, All SIMD |
+## 🎯 Quick Start
 
-### Choose Your Deployment Method
+### Basic Usage
 
-#### Docker Deployment (Recommended)
 ```bash
-# Quick Docker setup
-docker run --rm -it \
-  --cap-add=NET_RAW \
-  -v $(pwd)/config.json:/config/config.json \
-  mesh-probe start --config /config/config.json
+# Single measurement
+./probe.exe measure 8.8.8.8
+
+# Average 10 measurements
+./probe.exe measure 8.8.8.8 -n 10
+
+# Continuous monitoring (default 1-second intervals)
+./probe.exe measure 8.8.8.8 --continuous
+
+# Custom interval (5 seconds)
+./probe.exe measure 8.8.8.8 --continuous --interval 5s
+
+# JSON output
+./probe.exe measure 8.8.8.8 -n 5 -f json
 ```
 
-#### Binary Deployment
-```bash
-# Linux (with capabilities)
-sudo setcap cap_net_raw+ep probe
-./probe start --config config.json
+### Configuration File
 
-# Windows (run as Administrator)
-probe.exe start --config config.json
-
-# macOS (remove quarantine)
-xattr -rd com.apple.quarantine probe
-./probe start --config config.json
-```
-
-### Basic Configuration
-
-#### Minimal Configuration
+Create `config.json`:
 ```json
 {
-  "id": "basic_probe",
-  "name": "Basic Probe",
+  "name": "Network Monitor",
+  "version": 1,
   "network": {
+    "buffer_size": 2048,
     "ttl": 64
   },
   "targets": [
     {
-      "id": "local_test",
-      "address": "127.0.0.1",
-      "interval": "5s"
+      "id": "google_dns",
+      "address": "8.8.8.8",
+      "enabled": true,
+      "timeout": 5
+    },
+    {
+      "id": "cloudflare_dns",
+      "address": "1.1.1.1",
+      "enabled": true,
+      "timeout": 5
+    }
+  ],
+  "telemetry": {
+    "enable_metrics": true,
+    "enable_tracing": true,
+    "enable_logging": true,
+    "log_level": "info",
+    "log_format": "text"
+  }
+}
+```
+
+### Using Configuration File
+
+```bash
+# Use targets from config
+./probe.exe -c config.json measure
+
+# Average 3 measurements for config targets
+./probe.exe -c config.json measure -n 3
+
+# Continuous monitoring of config targets
+./probe.exe -c config.json measure --continuous
+
+# Override interval
+./probe.exe -c config.json measure --continuous --interval 30s
+```
+
+## 📖 Command Line Reference
+
+### Global Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-c, --config` | Configuration file path | None |
+| `-l, --log-level` | Log level (debug, info, warn, error) | info |
+| `-f, --log-format` | Output format (text, json) | text |
+| `-v, --verbose` | Enable verbose output | false |
+| `-p, --probe-id` | Custom probe identifier | Auto-generated |
+
+### Measurement Control Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-n, --count` | Number of measurements for averaging | 1 |
+| `--continuous` | Enable continuous measurement mode | false |
+| `--interval` | Interval for continuous measurements | 1s |
+
+### Interval Formats
+
+Supported duration formats:
+- `ns`, `µs`, `ms`, `s`, `m`, `h`
+- Examples: `500ms`, `1s`, `5m`, `2h`
+
+## 📊 Output Examples
+
+### Single Measurement (Text)
+```bash
+$ ./probe.exe measure 8.8.8.8
+SUCCESS: cmd_target_1 -> 8.8.8.8: 10.5154ms
+```
+
+### Averaged Measurements (Text)
+```bash
+$ ./probe.exe measure 8.8.8.8 -n 5 -v
+Using 1 targets from command line
+Performing 5 measurements per target for averaging
+Measurement round 1/5
+Measurement round 2/5
+Measurement round 3/5
+Measurement round 4/5
+Measurement round 5/5
+
+=== Averaged Results (5 measurements) ===
+cmd_target_1 -> 8.8.8.8:
+  Average: 10.34202ms
+  Min: 10.0007ms
+  Max: 10.571ms
+  StdDev: 285.12µs
+  Success Rate: 100.0% (5/5)
+```
+
+### Single Measurement (JSON)
+```bash
+$ ./probe.exe measure 8.8.8.8 -f json
+{
+  "results": [
+    {
+      "success": true,
+      "target": "cmd_target_1",
+      "address": "8.8.8.8",
+      "rtt": "10ms"
+    }
+  ],
+  "total_targets": 1,
+  "success_count": 1,
+  "failure_count": 0
+}
+```
+
+### Averaged Measurements (JSON)
+```bash
+$ ./probe.exe measure 8.8.8.8 -n 3 -f json
+{
+  "measurement_count": 3,
+  "results": [
+    {
+      "target": "cmd_target_1",
+      "address": "8.8.8.8",
+      "average_rtt": "10.344366ms",
+      "min_rtt": "10.0001ms",
+      "max_rtt": "10.5192ms",
+      "std_dev": "298.155µs",
+      "success_rate": 1,
+      "total_measurements": 3,
+      "successful_count": 3,
+      "failed_count": 0
     }
   ]
 }
 ```
 
-#### Production Configuration
-```json
-{
-  "id": "production_probe",
-  "name": "Production Mesh Probe",
-  "network": {
-    "ttl": 64,
-    "buffer_size": 8192,
-    "interface": "auto"
-  },
-  "targets": [
-    {
-      "id": "gateway",
-      "address": "192.168.1.1",
-      "interval": "5s",
-      "priority": 10
-    },
-    {
-      "id": "dns_primary",
-      "address": "8.8.8.8",
-      "interval": "30s",
-      "priority": 9
-    }
-  ],
-  "telemetry": {
-    "otlp_endpoint": "localhost:4317",
-    "enable_tracing": true,
-    "enable_metrics": true,
-    "log_level": "info"
-  }
-}
-```
-
-### Platform Validation
-
+### Continuous Mode
 ```bash
-# Test your setup
-./probe --test-platform
-
-# Expected output for Linux/amd64:
-# OS: linux
-# Architecture: amd64
-# Capabilities: [icmp udp tcp raw_sockets sse2 avx2 aes]
-# Precision: nanosecond
-# Optimizations: {use_rdtsc: true, batch_size: 256}
+$ ./probe.exe measure 8.8.8.8 --continuous
+Starting continuous measurements with 1s interval
+Continuous measurement round 1
+SUCCESS: cmd_target_1 -> 8.8.8.8: 10.007ms
+Continuous measurement round 2
+SUCCESS: cmd_target_1 -> 8.8.8.8: 10.1034ms
+Continuous measurement round 3
+SUCCESS: cmd_target_1 -> 8.8.8.8: 10.5172ms
+...
 ```
 
-## 📖 Documentation
+## 🔧 Command Examples
 
-### 📋 Core Documentation
-
-- **[Quick Reference Guide](docs/quick-reference.md)** - Essential configuration patterns and commands
-- **[Cross-Platform Configuration Guide](docs/cross-platform-configuration.md)** - Comprehensive configuration options
-- **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues and solutions
-
-### 🎯 Key Features
-
-#### Cross-Platform Compatibility
-- **Automatic Platform Detection**: Detects OS and architecture automatically
-- **Architecture Optimizations**: 
-  - **x86_64**: RDTSC timing, AVX2 vectorization, 256-packet batches
-  - **ARM64**: ARM counter timing, NEON SIMD, 128-packet batches
-- **Platform-Specific APIs**: Raw sockets (Linux), Winsock (Windows), BPF (macOS)
-
-#### High-Performance ICMP Measurements
-- **Microsecond Precision**: Optimized timing across all platforms
-- **High-Frequency Monitoring**: Support for sub-second measurement intervals
-- **Batch Processing**: Efficient packet processing with SIMD optimizations
-- **Low Latency**: Minimal overhead measurements
-
-#### Enterprise-Ready Features
-- **OpenTelemetry Integration**: Built-in metrics, tracing, and logging
-- **Mesh Networking**: Multi-probe coordination and discovery
-- **Container Support**: Docker and Kubernetes deployment
-- **Configuration Management**: Dynamic config updates with etcd/Consul support
-
-## 🔧 Detailed Configuration
-
-### Deployment Scenarios
-
-#### 1. Desktop/Laptop Monitoring
-```json
-{
-  "network": {
-    "buffer_size": 4096
-  },
-  "targets": [
-    {
-      "id": "home_network",
-      "address": "192.168.1.1",
-      "interval": "10s",
-      "timeout": "5s"
-    }
-  ],
-  "telemetry": {
-    "export_interval": "60s",
-    "log_level": "info"
-  }
-}
-```
-
-#### 2. Server Monitoring
-```json
-{
-  "network": {
-    "buffer_size": 8192,
-    "interface": "eth0"
-  },
-  "targets": [
-    {
-      "id": "load_balancer",
-      "address": "10.0.1.10",
-      "interval": "2s",
-      "priority": 10
-    },
-    {
-      "id": "database",
-      "address": "10.0.1.20",
-      "interval": "5s",
-      "priority": 9
-    }
-  ],
-  "telemetry": {
-    "export_interval": "30s",
-    "enable_tracing": true
-  },
-  "mesh": {
-    "enabled": true,
-    "discovery_method": "multicast"
-  }
-}
-```
-
-#### 3. Container/Orchestration
-```json
-{
-  "network": {
-    "interface": "eth0",
-    "buffer_size": 4096
-  },
-  "targets": [
-    {
-      "id": "service_mesh",
-      "address": "10.244.0.1",
-      "interval": "15s"
-    }
-  ],
-  "telemetry": {
-    "enable_logging": false,
-    "export_interval": "300s"
-  },
-  "mesh": {
-    "enabled": false
-  }
-}
-```
-
-### Performance Tuning
-
-#### High-Frequency Monitoring (Linux)
-```json
-{
-  "network": {
-    "buffer_size": 16384,
-    "ttl": 64
-  },
-  "telemetry": {
-    "export_interval": "5s"
-  },
-  "optimizations": {
-    "batch_size": 512,
-    "packet_alignment": 64
-  }
-}
-```
-
-#### Resource-Constrained Environments
-```json
-{
-  "network": {
-    "buffer_size": 2048
-  },
-  "telemetry": {
-    "enable_logging": false,
-    "export_interval": "300s"
-  },
-  "optimizations": {
-    "batch_size": 32
-  }
-}
-```
-
-### Container Orchestration
-
-#### Docker Compose
-```yaml
-version: '3.8'
-services:
-  mesh-probe:
-    image: mesh-probe:latest
-    network_mode: host
-    cap_add:
-      - NET_RAW
-    volumes:
-      - ./config:/config:ro
-      - ./data:/data
-    environment:
-      - PROBE_LOG_LEVEL=info
-    restart: unless-stopped
-```
-
-#### Kubernetes DaemonSet
-```yaml
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: mesh-probe
-spec:
-  selector:
-    matchLabels:
-      app: mesh-probe
-  template:
-    spec:
-      hostNetwork: true
-      containers:
-      - name: mesh-probe
-        image: mesh-probe:latest
-        securityContext:
-          capabilities:
-            add: [NET_RAW]
-```
-
-## 📊 Monitoring and Metrics
-
-### OpenTelemetry Integration
-
-```json
-{
-  "telemetry": {
-    "otlp_endpoint": "localhost:4317",
-    "enable_tracing": true,
-    "enable_metrics": true,
-    "export_interval": "30s"
-  }
-}
-```
-
-### Prometheus Metrics
-
-Access metrics at `http://localhost:8080/metrics`:
-
-```
-# HELP probe_measurements_total Total number of ICMP measurements
-# TYPE probe_measurements_total counter
-probe_measurements_total{success="true"} 150
-probe_measurements_total{success="false"} 5
-
-# HELP probe_rtt_microseconds ICMP round-trip time in microseconds
-# TYPE probe_rtt_microseconds histogram
-probe_rtt_microseconds_bucket{le="100"} 45
-probe_rtt_microseconds_bucket{le="500"} 120
-probe_rtt_microseconds_bucket{le="1000"} 150
-```
-
-## 🛠️ Troubleshooting
-
-### Common Issues by Platform
-
-| Platform | Issue | Quick Fix |
-|----------|-------|-----------|
-| Windows | "Access denied" for ICMP | Run as Administrator |
-| Linux | "Operation not permitted" | Add `cap_net_raw` capability |
-| macOS | Sandbox restrictions | Remove quarantine attribute |
-
-### Diagnostic Commands
-
+### Single Target
 ```bash
-# Platform capability check
-./probe --test-platform
+# Basic ping
+./probe.exe measure 8.8.8.8
 
-# Configuration validation
-./probe validate-config --config config.json
+# 10 measurements average
+./probe.exe measure 8.8.8.8 -n 10
 
-# Network diagnostics
-./probe ping --target 8.8.8.8 --count 5
-
-# Performance monitoring
-./probe metrics --format prometheus
+# JSON output
+./probe.exe measure 8.8.8.8 -f json
 ```
 
-See the [Troubleshooting Guide](docs/troubleshooting.md) for detailed solutions.
+### Multiple Targets
+```bash
+# Multiple CLI targets
+./probe.exe measure 8.8.8.8 1.1.1.1 8.8.4.4
+
+# Average 5 measurements
+./probe.exe measure 8.8.8.8 1.1.1.1 -n 5
+
+# Mixed configuration and CLI
+./probe.exe -c config.json measure 1.1.1.1
+```
+
+### Continuous Monitoring
+```bash
+# Default 1-second intervals
+./probe.exe measure 8.8.8.8 --continuous
+
+# 5-second intervals
+./probe.exe measure 8.8.8.8 --continuous --interval 5s
+
+# Monitor config targets
+./probe.exe -c config.json measure --continuous --interval 30s
+```
+
+### Advanced Examples
+```bash
+# Verbose continuous mode with custom interval
+./probe.exe -c config.json measure -v --continuous --interval 10s
+
+# High-precision averaging (20 samples) with JSON output
+./probe.exe measure 8.8.8.8 -n 20 -f json
+
+# Debug logging
+./probe.exe measure 8.8.8.8 -l debug -n 3
+```
 
 ## 🏗️ Architecture
 
-### Component Overview
+### Key Components
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Mesh Net Probe                          │
+│                    Mesh Probe Application                   │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐  │
-│  │   Platform      │  │  Configuration  │  │   Network    │  │
-│  │   Detection     │  │    Manager      │  │   Interface  │  │
+│  │   Platform      │  │  Configuration  │  │  Command     │  │
+│  │   Detection     │  │    Parser       │  │   Parser     │  │
 │  └─────────────────┘  └─────────────────┘  └──────────────┘  │
 │           │                     │                    │       │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐  │
-│  │    ICMP         │  │   Timing        │  │  Telemetry   │  │
-│  │   Engine        │  │   Engine        │  │   Provider   │  │
+│  │    ICMP         │  │   Timing        │  │  Output      │  │
+│  │   Engine        │  │   Engine        │  │  Formatter   │  │
 │  └─────────────────┘  └─────────────────┘  └──────────────┘  │
 │           │                     │                    │       │
 └─────────────────────────────────────────────────────────────┘
-           │                     │                    │
-    ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-    │   Raw/      │      │   High      │      │ OpenTelemetry│
-    │  Winsock    │      │Precision    │      │   Collector  │
-    │  Sockets    │      │   Timing    │      │             │
-    └─────────────┘      └─────────────┘      └─────────────┘
+            │                     │                    │
+     ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+     │   Raw/      │      │   High      │      │    Text/    │
+     │  Winsock    │      │Precision    │      │    JSON     │
+     │  Sockets    │      │   Timing    │      │  Output     │
+     └─────────────┘      └─────────────┘      └─────────────┘
 ```
 
-### Platform Abstraction Layer
+### Platform Support Matrix
 
-The probe automatically adapts to platform capabilities:
+| Platform | Architecture | ICMP Method | Timing Precision |
+|----------|-------------|-------------|------------------|
+| **Windows** | x86_64, ARM64 | Winsock Simulation | Millisecond |
+| **Linux** | x86_64, ARM64 | Raw Sockets | Nanosecond |
+| **macOS** | x86_64, ARM64 | BPF | Microsecond |
 
-- **Windows**: Winsock API with millisecond precision
-- **Linux**: Raw sockets with nanosecond precision  
-- **macOS**: BPF with microsecond precision
+### Statistical Features
 
-## 🧪 Testing and Validation
+- **Sample Standard Deviation**: Unbiased sample formula (n-1 denominator)
+- **Success Rate**: Percentage of successful vs total measurements
+- **Range Analysis**: Min/max values across measurement series
+- **Robust Statistics**: Handles mixed success/failure scenarios
 
-### Platform Compatibility Testing
+## 🛠️ Development
+
+### Building
 
 ```bash
-# Test all supported platforms
-./probe test-platform --cross-platform
+# Build for current platform
+go build -o probe ./cmd/probe/
 
-# Architecture-specific tests
-./probe test-architecture --arch amd64
-./probe test-architecture --arch arm64
-
-# Performance benchmarking
-./probe benchmark --duration 60s
+# Cross-compile
+GOOS=windows GOARCH=amd64 go build -o probe.exe ./cmd/probe/
+GOOS=linux GOARCH=arm64 go build -o probe-linux-arm64 ./cmd/probe/
 ```
 
-### Configuration Validation
+### Testing
 
 ```bash
-# Strict validation
-./probe validate-config --strict --config config.json
+# Run tests
+go test ./...
 
-# Platform-specific validation
-./probe validate-platform --platform linux/amd64
+# Run with coverage
+go test -cover ./...
 
-# Network interface validation
-./probe check-interfaces
+# Cross-platform tests
+go test -race ./...
 ```
 
-## 📚 Additional Resources
+### Code Structure
 
-### External Documentation
-- [OpenTelemetry Documentation](https://opentelemetry.io/docs/)
-- [Docker Networking Guide](https://docs.docker.com/network/)
-- [Kubernetes Networking Concepts](https://kubernetes.io/docs/concepts/cluster-networking/)
+```
+cmd/probe/
+├── main.go              # Command line interface and orchestration
 
-### Community and Support
-- **Issues**: Report bugs and feature requests
-- **Discussions**: Ask questions and share configurations
-- **Wiki**: Community-contributed configurations and scripts
+internal/
+├── icmp/
+│   └── engine.go        # ICMP measurement engine with simulation mode
+├── platform/
+│   └── detection.go     # Cross-platform detection and compatibility
+├── config/
+│   └── manager.go       # Configuration loading and validation
+└── telemetry/
+    └── metrics.go       # Metrics collection and reporting
 
-### Development
-- **API Reference**: See [pkg/types/](pkg/types/) for type definitions
-- **Source Code**: Architecture and implementation details
-- **Contributing**: Guidelines for contributing to the project
+pkg/types/
+├── config.go            # Configuration data structures
+├── measurement.go       # Measurement result structures
+└── target.go            # Target configuration structures
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+#### Windows ICMP Permission
+- **Issue**: `platform validation failed: Windows platform requires additional configuration`
+- **Solution**: Run as Administrator or use simulation mode (default)
+
+#### No Output
+- **Issue**: Command runs but produces no output
+- **Solution**: Check target addresses and network connectivity
+
+#### High Latency Values
+- **Issue**: Measurements showing unrealistic high latencies
+- **Solution**: Normal for simulation mode; real ICMP requires admin privileges
+
+### Platform-Specific Notes
+
+**Windows:**
+- Simulation mode is default (no admin privileges required)
+- For real ICMP, run as Administrator
+- Precision limited to millisecond timing
+
+**Linux:**
+- Best performance with raw sockets and CAP_NET_RAW
+- Nanosecond timing precision available
+- Multi-architecture support (x86_64, ARM64, ARM)
+
+**macOS:**
+- BPF-based measurements
+- Microsecond timing precision
+- Requires permission removal for non-signed binaries
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📞 Support
+
+For support, please open an issue in the repository or contact the development team.
 
 ---
 
-## Quick Links
-
-- **[Quick Start](docs/quick-reference.md)** - Essential commands and patterns
-- **[Configuration Guide](docs/cross-platform-configuration.md)** - Complete configuration reference  
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
-- **[GitHub Repository](https://github.com/mesh-net-probe/probe)** - Source code and issues
-
----
-
-## Getting Started with Configuration
-
-For immediate deployment, see the [Quick Reference Guide](docs/quick-reference.md) for common configuration patterns and platform-specific commands.
-
-For comprehensive configuration options, see the [Cross-Platform Configuration Guide](docs/cross-platform-configuration.md#configuration-options) including:
-- [Platform-Specific Settings](docs/cross-platform-configuration.md#platform-specific-settings)
-- [Architecture Optimizations](docs/cross-platform-configuration.md#architecture-optimizations)
-- [Performance Tuning](docs/cross-platform-configuration.md#performance-tuning)
-
-For troubleshooting common issues, see the [Troubleshooting Guide](docs/troubleshooting.md) covering:
-- Platform-specific problems and solutions
-- Network configuration issues
-- Permission and deployment errors
-
----
-
-*For the latest updates and detailed API documentation, visit the [project repository](https://github.com/mesh-net-probe/probe).*
+*Mesh Probe System - High-precision ICMP measurements with statistical analysis and continuous monitoring*
