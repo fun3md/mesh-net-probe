@@ -1,0 +1,30 @@
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+.dockerignore
+
+# Documentation and scripts
+README.md
+*.md
+
+# Log files
+*.log*
+
+# Environment files
+.env*
+!.env.example
+
+# Coverage reports
+coverage/
+*.cover
+
+# Build artifacts
+dist/
+bin/
+
+# Test artifacts
+*.test
+*.exe

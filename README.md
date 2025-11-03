@@ -1,0 +1,2 @@
+
+Design and build a cross-platform distributed mesh probe system in Go for high-resolution (microsecond) ICMP measurements on Linux, macOS, and Windows for both x64 and ARM architectures. Securely manage probe configurations from a central datasource and containerize the application for linux/amd64 and linux/arm64 using a multi-platform Dockerfile. All collected metrics and logs must be exported to an OpenTelemetry Collector via the OpenTelemetry Protocol (OTLP) for centralized observability.
