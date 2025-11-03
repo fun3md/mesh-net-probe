@@ -1,20 +1,10 @@
-# Documentation Index
+# Mesh Net Probe
 
-Welcome to the Mesh Net Probe documentation. This directory contains comprehensive guides for deploying, configuring, and troubleshooting the cross-platform mesh probe system.
+A high-performance, cross-platform ICMP measurement tool that automatically adapts to Windows, Linux, and macOS on x86_64 and ARM64 architectures with automatic optimization for each platform.
 
-## Quick Start
+## 🚀 Quick Start
 
-For immediate deployment, see the [Quick Reference Guide](quick-reference.md) for common configuration patterns and platform-specific commands.
-
-## Documentation Structure
-
-### 📋 Overview Documents
-
-- **[Quick Reference Guide](quick-reference.md)** - Essential configuration patterns and commands
-- **[Cross-Platform Configuration Guide](cross-platform-configuration.md)** - Comprehensive configuration options
-- **[Troubleshooting Guide](troubleshooting.md)** - Common issues and solutions
-
-### 🎯 Platform Support
+### Platform Support
 
 | Platform | Architecture | Support Level | Key Features |
 |----------|-------------|---------------|--------------|
@@ -22,9 +12,7 @@ For immediate deployment, see the [Quick Reference Guide](quick-reference.md) fo
 | **Linux** | x86_64, ARM64, ARM | ✅ Full | Raw sockets, CAP_NET_RAW, All SIMD |
 | **macOS** | x86_64, ARM64 | ✅ Full | BPF, System permissions, All SIMD |
 
-## 🚀 Getting Started
-
-### 1. Choose Your Deployment Method
+### Choose Your Deployment Method
 
 #### Docker Deployment (Recommended)
 ```bash
@@ -49,7 +37,7 @@ xattr -rd com.apple.quarantine probe
 ./probe start --config config.json
 ```
 
-### 2. Basic Configuration
+### Basic Configuration
 
 #### Minimal Configuration
 ```json
@@ -102,7 +90,7 @@ xattr -rd com.apple.quarantine probe
 }
 ```
 
-### 3. Platform Validation
+### Platform Validation
 
 ```bash
 # Test your setup
@@ -116,15 +104,36 @@ xattr -rd com.apple.quarantine probe
 # Optimizations: {use_rdtsc: true, batch_size: 256}
 ```
 
-## 📖 Detailed Guides
+## 📖 Documentation
 
-### Configuration Options
+### 📋 Core Documentation
 
-The probe supports rich configuration with automatic platform adaptation:
+- **[Quick Reference Guide](docs/quick-reference.md)** - Essential configuration patterns and commands
+- **[Cross-Platform Configuration Guide](docs/cross-platform-configuration.md)** - Comprehensive configuration options
+- **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues and solutions
 
-- **[Complete Configuration Reference](cross-platform-configuration.md#configuration-options)** - All configuration options
-- **[Platform-Specific Settings](cross-platform-configuration.md#platform-specific-settings)** - OS-specific behavior
-- **[Architecture Optimizations](cross-platform-configuration.md#architecture-optimizations)** - x64/ARM64 optimizations
+### 🎯 Key Features
+
+#### Cross-Platform Compatibility
+- **Automatic Platform Detection**: Detects OS and architecture automatically
+- **Architecture Optimizations**: 
+  - **x86_64**: RDTSC timing, AVX2 vectorization, 256-packet batches
+  - **ARM64**: ARM counter timing, NEON SIMD, 128-packet batches
+- **Platform-Specific APIs**: Raw sockets (Linux), Winsock (Windows), BPF (macOS)
+
+#### High-Performance ICMP Measurements
+- **Microsecond Precision**: Optimized timing across all platforms
+- **High-Frequency Monitoring**: Support for sub-second measurement intervals
+- **Batch Processing**: Efficient packet processing with SIMD optimizations
+- **Low Latency**: Minimal overhead measurements
+
+#### Enterprise-Ready Features
+- **OpenTelemetry Integration**: Built-in metrics, tracing, and logging
+- **Mesh Networking**: Multi-probe coordination and discovery
+- **Container Support**: Docker and Kubernetes deployment
+- **Configuration Management**: Dynamic config updates with etcd/Consul support
+
+## 🔧 Detailed Configuration
 
 ### Deployment Scenarios
 
@@ -205,36 +214,6 @@ The probe supports rich configuration with automatic platform adaptation:
 }
 ```
 
-### Troubleshooting
-
-#### Common Issues by Platform
-
-| Platform | Issue | Quick Fix |
-|----------|-------|-----------|
-| Windows | "Access denied" for ICMP | Run as Administrator |
-| Linux | "Operation not permitted" | Add `cap_net_raw` capability |
-| macOS | Sandbox restrictions | Remove quarantine attribute |
-
-#### Diagnostic Commands
-
-```bash
-# Platform capability check
-./probe --test-platform
-
-# Configuration validation
-./probe validate-config --config config.json
-
-# Network diagnostics
-./probe ping --target 8.8.8.8 --count 5
-
-# Performance monitoring
-./probe metrics --format prometheus
-```
-
-See the [Troubleshooting Guide](troubleshooting.md) for detailed solutions.
-
-## 🔧 Advanced Topics
-
 ### Performance Tuning
 
 #### High-Frequency Monitoring (Linux)
@@ -269,20 +248,6 @@ See the [Troubleshooting Guide](troubleshooting.md) for detailed solutions.
   }
 }
 ```
-
-### Architecture-Specific Features
-
-#### x86_64 (AMD64)
-- **AVX2 Vectorization**: 256-bit SIMD for packet processing
-- **RDTSC Timing**: High-precision time measurements
-- **AES-NI**: Hardware-accelerated encryption
-- **Large Batches**: Optimized for 256-packet batches
-
-#### ARM64
-- **NEON SIMD**: 128-bit SIMD for ARM architectures
-- **ARM Counter**: Native ARM high-precision timing
-- **Optimized Batches**: 128-packet batches for ARM efficiency
-- **Memory Alignment**: 64-byte cache line alignment
 
 ### Container Orchestration
 
@@ -355,6 +320,34 @@ probe_rtt_microseconds_bucket{le="100"} 45
 probe_rtt_microseconds_bucket{le="500"} 120
 probe_rtt_microseconds_bucket{le="1000"} 150
 ```
+
+## 🛠️ Troubleshooting
+
+### Common Issues by Platform
+
+| Platform | Issue | Quick Fix |
+|----------|-------|-----------|
+| Windows | "Access denied" for ICMP | Run as Administrator |
+| Linux | "Operation not permitted" | Add `cap_net_raw` capability |
+| macOS | Sandbox restrictions | Remove quarantine attribute |
+
+### Diagnostic Commands
+
+```bash
+# Platform capability check
+./probe --test-platform
+
+# Configuration validation
+./probe validate-config --config config.json
+
+# Network diagnostics
+./probe ping --target 8.8.8.8 --count 5
+
+# Performance monitoring
+./probe metrics --format prometheus
+```
+
+See the [Troubleshooting Guide](docs/troubleshooting.md) for detailed solutions.
 
 ## 🏗️ Architecture
 
@@ -433,7 +426,7 @@ The probe automatically adapts to platform capabilities:
 - **Wiki**: Community-contributed configurations and scripts
 
 ### Development
-- **API Reference**: See [pkg/types/](../pkg/types/) for type definitions
+- **API Reference**: See [pkg/types/](pkg/types/) for type definitions
 - **Source Code**: Architecture and implementation details
 - **Contributing**: Guidelines for contributing to the project
 
@@ -441,10 +434,26 @@ The probe automatically adapts to platform capabilities:
 
 ## Quick Links
 
-- **[Quick Start](quick-reference.md)** - Essential commands and patterns
-- **[Configuration Guide](cross-platform-configuration.md)** - Complete configuration reference  
-- **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
+- **[Quick Start](docs/quick-reference.md)** - Essential commands and patterns
+- **[Configuration Guide](docs/cross-platform-configuration.md)** - Complete configuration reference  
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 - **[GitHub Repository](https://github.com/mesh-net-probe/probe)** - Source code and issues
+
+---
+
+## Getting Started with Configuration
+
+For immediate deployment, see the [Quick Reference Guide](docs/quick-reference.md) for common configuration patterns and platform-specific commands.
+
+For comprehensive configuration options, see the [Cross-Platform Configuration Guide](docs/cross-platform-configuration.md#configuration-options) including:
+- [Platform-Specific Settings](docs/cross-platform-configuration.md#platform-specific-settings)
+- [Architecture Optimizations](docs/cross-platform-configuration.md#architecture-optimizations)
+- [Performance Tuning](docs/cross-platform-configuration.md#performance-tuning)
+
+For troubleshooting common issues, see the [Troubleshooting Guide](docs/troubleshooting.md) covering:
+- Platform-specific problems and solutions
+- Network configuration issues
+- Permission and deployment errors
 
 ---
 
