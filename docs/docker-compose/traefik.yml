@@ -1,0 +1,162 @@
+# Traefik configuration for production deployment
+# Main configuration file
+
+api:
+  dashboard: true
+  insecure: false
+  debug: false
+
+log:
+  level: INFO
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: ${ACME_EMAIL}
+      storage: /ssl/acme.json
+      httpChallenge:
+        entryPoint: web
+      dnsChallenge: # Alternative DNS challenge if needed
+        provider: cloudflare
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: mesh-probe-prod
+  file:
+    filename: /etc/traefik/traefik.yml
+
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true
+
+ping:
+  entryPoint: "web"
+
+tracing:
+  jaeger:
+    samplingServerURL: http://jaeger:14268/sampling
+    samplingParam: 1.0
+
+# Middleware configurations
+http:
+  middlewares:
+    # Security headers
+    security-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+        accessControlAllowOriginList:
+          - "*"
+        accessControlMaxAge: 100
+        hostsProxyHeaders:
+          - "X-Forwarded-Host"
+        referrerPolicy: "same-origin"
+        stsSeconds: 63072000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        customFrameOptionsValue: "SAMEORIGIN"
+        contentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    
+    # Rate limiting
+    rate-limit:
+      rateLimit:
+        burst: 100
+        average: 50
+    
+    # Authentication for admin dashboard
+    admin-auth:
+      basicAuth:
+        users:
+          - "admin:$2b$12$example.hash.for.admin"
+
+    # SSL redirect
+    https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+  routers:
+    # Traefik dashboard
+    traefik-dashboard:
+      rule: "Host(`traefik.${DOMAIN}`)"
+      service: "api@internal"
+      entrypoints:
+        - web
+      middlewares:
+        - admin-auth
+        - security-headers
+      tls:
+        certResolver: letsencrypt
+
+    # Admin Web application
+    admin-web:
+      rule: "Host(`${DOMAIN}`) && PathPrefix(`/api`)"
+      service: "admin-web-prod"
+      entrypoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - rate-limit
+      tls:
+        certResolver: letsencrypt
+
+    # Frontend application
+    frontend:
+      rule: "Host(`${DOMAIN}`)"
+      service: "admin-web-prod"
+      entrypoints:
+        - websecure
+      middlewares:
+        - security-headers
+      tls:
+        certResolver: letsencrypt
+
+    # Grafana
+    grafana:
+      rule: "Host(`grafana.${DOMAIN}`)"
+      service: "grafana-prod"
+      entrypoints:
+        - websecure
+      middlewares:
+        - admin-auth
+        - security-headers
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    # Admin Web service
+    admin-web-prod:
+      loadBalancer:
+        servers:
+          - url: "http://admin-web-prod:8080"
+        healthCheck:
+          path: "/health"
+          interval: "30s"
+          timeout: "10s"
+
+    # Grafana service
+    grafana-prod:
+      loadBalancer:
+        servers:
+          - url: "http://grafana-prod:3000"
+
+# Global configuration
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false

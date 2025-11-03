@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   admin-web-prod:
@@ -7,7 +7,6 @@ services:
       dockerfile: Dockerfile.multi-platform
       target: runtime-web
     image: mesh-probe:admin-web-prod
-    container_name: admin-web-prod
     ports:
       - "80:8080"
       - "443:8443"  # HTTPS (future)
@@ -61,7 +60,6 @@ services:
   # Production Redis Cluster for session storage
   redis-prod:
     image: redis:7-alpine
-    container_name: redis-prod
     ports:
       - "6379:6379"
     command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 512mb --maxmemory-policy allkeys-lru
@@ -89,7 +87,6 @@ services:
   # PostgreSQL for application data
   postgres-prod:
     image: postgres:15-alpine
-    container_name: postgres-prod
     ports:
       - "5432:5432"
     environment:
@@ -121,7 +118,6 @@ services:
   # Production monitoring stack
   prometheus-prod:
     image: prom/prometheus:latest
-    container_name: prometheus-prod
     ports:
       - "9090:9090"
     volumes:
@@ -148,7 +144,6 @@ services:
 
   grafana-prod:
     image: grafana/grafana:latest
-    container_name: grafana-prod
     ports:
       - "3000:3000"
     environment:
@@ -179,7 +174,6 @@ services:
   # Traefik reverse proxy
   traefik:
     image: traefik:v3.0
-    container_name: traefik
     ports:
       - "80:80"
       - "443:443"
