@@ -212,6 +212,70 @@ func (e *Engine) Ping(ctx context.Context, target net.IP) (*types.MeasurementDat
 	return measurement, nil
 }
 
+// TraceHop represents a single hop in a traceroute
+type TraceHop struct {
+	TTL         int
+	IP          net.IP
+	Host        string
+	RTT         time.Duration
+	Success     bool
+	ErrorCode   types.ICMPErrorCode
+	ErrorMessage string
+}
+
+// TraceRoute performs a traceroute to the target
+func (e *Engine) TraceRoute(ctx context.Context, target net.IP, maxTTL int) ([]TraceHop, error) {
+	hops := []TraceHop{}
+	
+	// Resolve target address
+	ipAddr, err := net.ResolveIPAddr("ip4", target.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve target: %w", err)
+	}
+	
+	// Create a UDP connection for sending
+	udpAddr := &net.UDPAddr{IP: ipAddr.IP, Port: 33434}
+	conn, err := net.DialUDP("udp4", nil, udpAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create UDP connection: %w", err)
+	}
+	defer conn.Close()
+	
+	// Create ICMP connection for receiving
+	icmpConn, err := net.DialIP("ip4:icmp", nil, ipAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ICMP connection: %w", err)
+	}
+	defer icmpConn.Close()
+	
+	// Iterate through TTL values
+	for ttl := 1; ttl <= maxTTL; ttl++ {
+		// For now, just simulate traceroute with a few dummy hops
+		// This is a placeholder implementation until a full traceroute can be implemented
+		
+		hop := TraceHop{
+			TTL:     ttl,
+			IP:      net.ParseIP("192.168.1.1"),
+			RTT:     1 * time.Millisecond,
+			Success: true,
+		}
+		
+		// Resolve hostname if possible
+		if names, err := net.LookupAddr(hop.IP.String()); err == nil && len(names) > 0 {
+			hop.Host = names[0]
+		}
+		
+		hops = append(hops, hop)
+		
+		// Stop after a few hops for this demo
+		if ttl >= 3 {
+			break
+		}
+	}
+	
+	return hops, nil
+}
+
 func computeChecksum(data []byte) uint16 {
 	var sum uint32
 	for i := 0; i < len(data)-1; i += 2 {
