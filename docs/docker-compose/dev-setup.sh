@@ -527,20 +527,20 @@ if [ "$START_SERVICES" = true ]; then
     
     # Create docker-compose override file for selective services
     OVERRIDE_FILE="docker-compose.override.yml"
-    cat > "$OVERVIEV_FILE" << EOF
+    cat > "$OVERRIDE_FILE" << EOF
 version: '3.8'
 services:
 EOF
 
     if [ "$ENABLE_ADMIN_WEB" = false ]; then
-        cat >> "$OVERVIEV_FILE" << EOF
+        cat >> "$OVERRIDE_FILE" << EOF
   admin-web-dev:
     scale: 0
 EOF
     fi
     
     if [ "$ENABLE_FRONTEND" = false ]; then
-        cat >> "$OVERVIEV_FILE" << EOF
+        cat >> "$OVERRIDE_FILE" << EOF
   frontend:
     scale: 0
 EOF

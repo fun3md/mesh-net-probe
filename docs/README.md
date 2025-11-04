@@ -18,6 +18,7 @@ The main documentation is now located in the repository root:
 ### Admin Web Server Documentation
 
 - **[ADMIN_WEB_LOCAL_TESTING.md](ADMIN_WEB_LOCAL_TESTING.md)** - Complete guide for local development, testing, and deployment of the admin web server
+- **[ADMIN_WEB_DEPENDENCIES.md](ADMIN_WEB_DEPENDENCIES.md)** - Comprehensive explanation of all dependencies used by the admin-web component
 - **[example-config/](example-config/)** - Environment-specific configuration examples
   - `development.json` - Development environment settings
   - `production.json` - Production deployment configuration
