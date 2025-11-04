@@ -431,7 +431,7 @@ if [ "$BUILD_ALL" = true ]; then
     
     if [ "$ENABLE_ADMIN_WEB" = true ]; then
         print_info "Building admin web Docker image..."
-        if docker build -f Dockerfile.multi-platform -t mesh-probe:admin-web-dev --target runtime-web ../.. 2>/dev/null; then
+        if docker build -f ../../Dockerfile.multi-platform -t mesh-probe:admin-web-dev --target runtime-web ../.. 2>/dev/null; then
             print_status "Admin web Docker image built"
         else
             print_error "Failed to build admin web Docker image"
@@ -441,7 +441,7 @@ if [ "$BUILD_ALL" = true ]; then
     
     if [ "$ENABLE_CLI_PROBE" = true ]; then
         print_info "Building CLI probe Docker image..."
-        if docker build -f Dockerfile.multi-platform -t mesh-probe:cli-dev --target runtime-cli ../.. 2>/dev/null; then
+        if docker build -f ../../Dockerfile.multi-platform -t mesh-probe:cli-dev --target runtime-cli ../.. 2>/dev/null; then
             print_status "CLI probe Docker image built"
         else
             print_error "Failed to build CLI probe Docker image"
@@ -451,7 +451,7 @@ if [ "$BUILD_ALL" = true ]; then
     
     if [ "$ENABLE_FRONTEND" = true ]; then
         print_info "Building frontend Docker image..."
-        if docker build -t mesh-probe:frontend-dev ../web/ 2>/dev/null; then
+        if docker build -t mesh-probe:frontend-dev ../../web/ 2>/dev/null; then
             print_status "Frontend Docker image built"
         else
             print_error "Failed to build frontend Docker image"
