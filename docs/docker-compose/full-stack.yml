@@ -10,7 +10,7 @@ services:
     container_name: mesh-probe-frontend
     ports:
       - "5173:5173"  # Vite dev server
-      - "3000:3000"  # Production build
+      - "3001:3000"  # Production build
     environment:
       - NODE_ENV=development
       - VITE_API_BASE_URL=http://localhost:8080
