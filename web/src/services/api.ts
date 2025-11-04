@@ -5,7 +5,6 @@ import type {
   Configuration,
   User,
   LoginRequest,
-  LoginResponse,
   PaginatedResponse,
   DashboardStats,
   Alert,
@@ -61,8 +60,8 @@ class ApiService {
   }
 
   // Authentication endpoints
-  async login(credentials: LoginRequest): Promise<LoginResponse> {
-    const response: AxiosResponse<LoginResponse> = await this.client.post('/auth/login', credentials);
+  async login(credentials: LoginRequest): Promise<any> {
+    const response: AxiosResponse<any> = await this.client.post('/auth/login', credentials);
     return response.data;
   }
 

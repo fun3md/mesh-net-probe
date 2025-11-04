@@ -59,7 +59,8 @@ export const useAuth = (): AuthState & AuthActions => {
       const response = await apiService.login(credentials);
       
       // Store tokens and user data
-      apiService.setAuthToken(response.token.accessToken);
+      // Backend returns: { token, user, expiresAt }
+      apiService.setAuthToken(response.token);
       localStorage.setItem('user', JSON.stringify(response.user));
       
       setState({

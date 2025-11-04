@@ -17,6 +17,12 @@
       "address": "1.1.1.1",
       "enabled": true,
       "timeout": 5
+    },
+    {
+      "id": "heise_de",
+      "address": "heise.de",
+      "enabled": true,
+      "timeout": 5
     }
   ],
   "telemetry": {

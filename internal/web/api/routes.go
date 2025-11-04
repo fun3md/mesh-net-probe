@@ -53,7 +53,7 @@ func RegisterAuthRoutes(router *gin.RouterGroup, authMiddleware *auth.Middleware
 	{
 		authGroup.POST("/login", handleLogin(authMiddleware))
 		authGroup.POST("/logout", authMiddleware.JWT(), handleLogout)
-		authGroup.GET("/me", authMiddleware.JWT(), handleMe)
+		authGroup.GET("/me", handleMe)
 		authGroup.POST("/refresh", authMiddleware.JWT(), handleRefresh)
 	}
 }

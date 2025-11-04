@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"time"
@@ -117,6 +118,7 @@ func runPing(cmd *cobra.Command, args []string) error {
 	icmpEngine, err := icmp.NewEngine(
 		icmp.WithTimeout(timeout),
 		icmp.WithBufferSize(65535),
+		icmp.WithVerbose(verbose),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create ICMP engine: %w", err)
@@ -225,13 +227,18 @@ func performSingleMeasurement(ctx context.Context, engine *icmp.Engine, platform
 
 // performBatchMeasurements performs multiple ICMP measurements
 func performBatchMeasurements(ctx context.Context, engine *icmp.Engine, platformInfo *types.PlatformInfo, target net.IP, count int, interval time.Duration) error {
-	fmt.Printf("PING %s (%d measurements, interval %s):\n\n", target.String(), count, interval)
+	if !jsonOutput {
+		fmt.Printf("PING %s (%d measurements, interval %s):\n\n", target.String(), count, interval)
+	}
 
 	successful := 0
 	failed := 0
 	var totalRTT time.Duration
 	var minRTT time.Duration = -1
 	var maxRTT time.Duration
+	
+	// For calculating standard deviation
+	var rttValues []time.Duration // Store RTT values for precise calculation
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -245,7 +252,9 @@ func performBatchMeasurements(ctx context.Context, engine *icmp.Engine, platform
 			
 			if err != nil {
 				failed++
-				fmt.Printf("Request %d: FAILED - %v\n", i+1, err)
+				if !jsonOutput {
+					fmt.Printf("Request %d: FAILED - %v\n", i+1, err)
+				}
 			} else {
 				successful++
 				
@@ -254,35 +263,112 @@ func performBatchMeasurements(ctx context.Context, engine *icmp.Engine, platform
 				measurement.PlatformData.Architecture = platformInfo.Arch
 				
 				// Update statistics
-				totalRTT += measurement.RTT
-				if minRTT == -1 || measurement.RTT < minRTT {
-					minRTT = measurement.RTT
+				rtt := measurement.RTT
+				totalRTT += rtt
+				
+				if minRTT == -1 || rtt < minRTT {
+					minRTT = rtt
 				}
-				if measurement.RTT > maxRTT {
-					maxRTT = measurement.RTT
+				if rtt > maxRTT {
+					maxRTT = rtt
 				}
+				
+				// Store RTT for precise calculation
+				rttValues = append(rttValues, rtt)
 				
 				if jsonOutput {
 					outputJSONMeasurement(measurement)
 				} else {
-					fmt.Printf("Request %d: time=%s ttl=%d size=%d bytes\n", i+1, 
-						measurement.RTT.Round(time.Microsecond), measurement.TTL, measurement.PacketSize)
+					fmt.Printf("Request %d: time=%s ttl=%d size=%d bytes\n", i+1,
+						rtt.Round(time.Microsecond), measurement.TTL, measurement.PacketSize)
 				}
 			}
 		}
 	}
 
-	// Output summary
+	// Output summary for JSON mode
+	if jsonOutput && successful > 0 {
+		avgRTT := totalRTT / time.Duration(successful)
+		lossRate := float64(failed) / float64(count) * 100
+		
+		// Calculate standard deviation
+		var stdDevRTT time.Duration
+		if len(rttValues) > 1 {
+			// Calculate mean
+			var sumSeconds float64
+			for _, rtt := range rttValues {
+				sumSeconds += rtt.Seconds()
+			}
+			meanSeconds := sumSeconds / float64(len(rttValues))
+			
+			// Calculate variance
+			var varianceSum float64
+			for _, rtt := range rttValues {
+				deviation := rtt.Seconds() - meanSeconds
+				varianceSum += deviation * deviation
+			}
+			variance := varianceSum / float64(len(rttValues)-1) // Sample variance
+			
+			// Calculate standard deviation
+			stdDevSeconds := math.Sqrt(variance)
+			stdDevRTT = time.Duration(stdDevSeconds * float64(time.Second))
+		} else {
+			stdDevRTT = 0
+		}
+		
+		// Output JSON summary
+		fmt.Printf(`{
+  "summary": {
+    "total_packets": %d,
+    "successful_packets": %d,
+    "failed_packets": %d,
+    "packet_loss": %0.2f,
+    "min_rtt": "%s",
+    "avg_rtt": "%s",
+    "max_rtt": "%s",
+    "stddev_rtt": "%s"
+  }
+}`, count, successful, failed, lossRate,
+			minRTT.Round(time.Microsecond), avgRTT.Round(time.Microsecond), maxRTT.Round(time.Microsecond), stdDevRTT.Round(time.Microsecond))
+	}
+	
+	// Output summary for text mode
 	if !jsonOutput && successful > 0 {
 		avgRTT := totalRTT / time.Duration(successful)
 		lossRate := float64(failed) / float64(count) * 100
 		
+		// Calculate standard deviation
+		var stdDevRTT time.Duration
+		if len(rttValues) > 1 {
+			// Calculate mean
+			var sumSeconds float64
+			for _, rtt := range rttValues {
+				sumSeconds += rtt.Seconds()
+			}
+			meanSeconds := sumSeconds / float64(len(rttValues))
+			
+			// Calculate variance
+			var varianceSum float64
+			for _, rtt := range rttValues {
+				deviation := rtt.Seconds() - meanSeconds
+				varianceSum += deviation * deviation
+			}
+			variance := varianceSum / float64(len(rttValues)-1) // Sample variance
+			
+			// Calculate standard deviation
+			stdDevSeconds := math.Sqrt(variance)
+			stdDevRTT = time.Duration(stdDevSeconds * float64(time.Second))
+		} else {
+			stdDevRTT = 0
+		}
+		
 		fmt.Printf("\n--- %s ping statistics ---\n", target.String())
 		fmt.Printf("%d packets transmitted, %d received, %.1f%% packet loss\n", count, successful, lossRate)
-		fmt.Printf("round-trip min/avg/max = %s/%s/%s\n", 
-			minRTT.Round(time.Microsecond), 
-			avgRTT.Round(time.Microsecond), 
+		fmt.Printf("round-trip min/avg/max = %s/%s/%s\n",
+			minRTT.Round(time.Microsecond),
+			avgRTT.Round(time.Microsecond),
 			maxRTT.Round(time.Microsecond))
+		fmt.Printf("stddev = %s\n", stdDevRTT.Round(time.Microsecond))
 	}
 
 	return nil
