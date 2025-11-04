@@ -119,7 +119,7 @@ services:
 
   # Development etcd (for configuration management)
   etcd:
-    image: gcr.io/etcd-development/etcd:v3.5
+    image: gcr.io/etcd-development/etcd:v3.5.24
     container_name: mesh-probe-etcd
     ports:
       - "2379:2379"
