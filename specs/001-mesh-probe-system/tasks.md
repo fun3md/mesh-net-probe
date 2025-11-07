@@ -410,6 +410,87 @@ description: "Task list template for feature implementation"
 
 ---
 
+## Phase 5.4: Frontend - Probe Configuration, Build Config Assignment, and Measurement Tasks
+
+**Goal**: Admin can use the web UI to:
+- Configure probes (registry-backed)
+- Define reusable "build configurations" (probe configuration profiles/templates)
+- Assign build configurations to one or more probes
+- Define and manage ping/traceroute measurement tasks against targets per configuration
+- Ensure each slice is independently testable via the UI using real backend APIs
+
+### Dependencies
+
+- Depends on:
+  - Phase 5.1 centralized config hardening (T093–T100)
+  - Phase 5.2 frontend API alignment (T210–T273)
+  - Probe daemon/agent integration (Phase 5.3) for config application and status
+- Can be developed in parallel with Phase 6 polish tasks once above dependencies are met.
+
+### Phase 5.4 Tasks (Frontend-Only Scope)
+
+- [ ] T500 Create dedicated probe configuration UI shell in web/src/pages/Targets.tsx to manage probes, assignments, and tasks with real /probes and /config APIs
+- [ ] T501 [P] Implement probe list refresh + status indicators in web/src/pages/Targets.tsx using apiService.getProbesAdmin() and Probe schema from contracts/admin-web.openapi.yaml
+- [ ] T502 [P] Implement "Build Configuration" type and client models in web/src/types/index.ts to represent reusable probe configuration profiles (id, name, description, configRef or embedded spec)
+- [ ] T503 [P] Add configuration service helpers in web/src/services/api.ts to load and save active configuration used as base for build configs (GET /config, GET /config/status)
+- [ ] T504 Implement "Build Configurations" management panel in web/src/pages/Targets.tsx:
+  - list build configs (front-end managed or backed by /config)
+  - create/update/delete entries with name, description, and configuration payload reference
+- [ ] T505 [P] Add UI state in web/src/pages/Targets.tsx to map build configurations → one or more probes:
+  - multi-select probes
+  - assign selected build configuration
+  - persist mapping via apiService helper calling /probes/{id} update with config metadata fields (config_id, config_version, config_source)
+- [ ] T506 Implement "Apply configuration to probes" action in web/src/pages/Targets.tsx:
+  - For each selected probe:
+    - call apiService.updateProbeAdmin(id, { metadata/config fields })
+    - optionally trigger /config/propagate via apiService when relevant build configuration points at new central config
+  - reflect assignments in the table using Probe.config_* fields
+- [ ] T507 [P] Add visual indicators for configuration assignment in web/src/pages/Targets.tsx:
+  - columns for Config ID, Version, Source, AppliedAt (read from Probe fields)
+  - highlight probes with stale or missing config (based on config metadata vs selected build config)
+- [ ] T508 Implement "Measurement Tasks" model for ping/traceroute in web/src/types/index.ts:
+  - fields: id, name, type (ping|traceroute), targets[], interval, timeout, attachedConfigId
+- [ ] T509 [P] Extend web/src/services/api.ts with helpers to persist measurement task definitions via /config (embed under a dedicated key, e.g. data.tasks or data.measurementTasks) aligned with existing Configuration schema
+- [ ] T510 Implement Measurement Tasks UI within web/src/pages/Targets.tsx:
+  - create/update/delete ping/traceroute task definitions
+  - bind each task to:
+    - one build configuration (by id) OR
+    - direct probe selection for ad-hoc scenarios
+- [ ] T511 Wire "Assign Tasks to Probes" flow in web/src/pages/Targets.tsx:
+  - when saving tasks:
+    - ensure associated build config id is stored in the central configuration payload
+    - show which probes will execute which tasks based on assigned build configuration
+- [ ] T512 [P] Add client-side validation in web/src/pages/Targets.tsx:
+  - require at least one target per task
+  - validate interval/timeout ranges
+  - ensure a valid build configuration or probe assignment is selected before saving
+- [ ] T513 Implement optimistic UI + error handling for all config/task operations in web/src/pages/Targets.tsx:
+  - show loading states and explicit error banners when /config or /probes calls fail
+  - rollback UI on failure to avoid inconsistent assignments
+- [ ] T514 [P] Connect probe assignment and task configuration views to heartbeat and config-applied data:
+  - read /probes and /probes/{id}/config-applied (via Probe fields or endpoint if present)
+  - display which probes have confirmed the assigned build configuration
+- [ ] T515 Add independent test criteria documentation in specs/001-mesh-probe-system/admin-web-interface.md:
+  - describe manual test steps:
+    - create build configuration
+    - assign to probes
+    - define ping/traceroute tasks
+    - verify assignments and config-applied statuses via UI
+
+### Dependencies & Story Mapping
+
+- Build Configuration management tasks (T500–T507) map primarily to centralized configuration story [US3] and admin web [US4] but are frontend-only.
+- Measurement Tasks (T508–T512) map to [US1] (ICMP measurement), [US3] (central control), and [US4] (UI orchestration).
+- Assignment and visualization tasks (T513–T515) ensure the probe configuration UX is independently testable from the frontend.
+
+### Parallel Execution Examples
+
+- [P] T501, T502, T503 can be implemented in parallel once types and apiService contracts are aligned.
+- [P] T504, T505, T507 can be implemented in parallel by separate engineers focusing on build config CRUD vs assignment vs visualization.
+- [P] T508, T509, T512 can be implemented in parallel with T504–T507 as long as shared types and endpoints are stable.
+
+---
+
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 **Purpose**: Improvements that affect multiple user stories

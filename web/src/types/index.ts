@@ -14,6 +14,11 @@ export interface Probe {
   health?: HealthStatus;
   createdAt: string;
   updatedAt: string;
+  // Optional configuration tracking fields as exposed by ProbeRegistry/admin-web API
+  configId?: string;
+  configVersion?: number;
+  configSource?: string;
+  configAppliedAt?: string;
 }
 
 export type ProbeStatus = 'online' | 'offline' | 'degraded' | 'unknown';
@@ -174,4 +179,50 @@ export interface ChartSeries {
   name: string;
   data: ChartDataPoint[];
   color?: string;
+}
+
+// Frontend-only: Reusable build configuration model for assigning config to probes.
+// These are stored under Configuration.data.buildConfigs in the backend configuration.
+export interface BuildConfiguration {
+  id: string;
+  name: string;
+  description?: string;
+  // Optional link into central configuration; if set, ties this build config to a specific backend config
+  configId?: string;
+  configVersion?: number;
+  configSource?: string;
+  // Arbitrary configuration fragment that can be merged into /config.data if used
+  spec?: Record<string, any>;
+}
+
+// Frontend-only: Ping/Traceroute measurement task definition bound to configs/probes.
+// These are stored under Configuration.data.measurementTasks.
+export type MeasurementTaskType = 'ping' | 'traceroute';
+
+export interface MeasurementTaskTarget {
+  id: string;
+  address: string;
+  description?: string;
+}
+
+export interface MeasurementTask {
+  id: string;
+  name: string;
+  type: MeasurementTaskType;
+  targets: MeasurementTaskTarget[];
+  intervalSeconds: number;
+  timeoutSeconds: number;
+  // Bind to a build configuration that defines how probes execute this task
+  buildConfigId?: string;
+  // Optional explicit list of probe IDs for ad-hoc assignments
+  probeIds?: string[];
+  enabled: boolean;
+}
+
+// Optional configuration tracking fields for probes surfaced in UI; backend may provide via ProbeRegistry
+export interface ProbeConfigMetadata {
+  configId?: string;
+  configVersion?: number;
+  configSource?: string;
+  configAppliedAt?: string;
 }

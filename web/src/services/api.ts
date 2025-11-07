@@ -7,7 +7,9 @@ import type {
   LoginRequest,
   DashboardStats,
   Alert,
-  HealthStatus
+  HealthStatus,
+  BuildConfiguration,
+  MeasurementTask,
 } from '@/types';
 
 // Extend the ImportMeta interface to include env
@@ -159,6 +161,10 @@ class ApiService {
       health: p.health,
       createdAt: p.createdAt ?? '',
       updatedAt: p.updatedAt ?? '',
+      configId: p.config_id ?? p.configId,
+      configVersion: p.config_version ?? p.configVersion,
+      configSource: p.config_source ?? p.configSource,
+      configAppliedAt: p.config_applied_at ?? p.configAppliedAt,
     })) as Probe[];
   }
 
@@ -339,17 +345,52 @@ class ApiService {
 
   // GET /probes/admin → { probes: Probe[] }
   async getProbesAdmin(): Promise<Probe[]> {
-    const response: AxiosResponse<{ probes: any[] }> =
-      await this.client.get('/probes/admin');
+    const response: AxiosResponse<{ probes: any[] }> = await this.client.get('/probes/admin');
     const probes = response.data.probes ?? [];
-    return probes as Probe[];
+    return probes.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      version: p.version,
+      platform: p.platform,
+      arch: p.arch,
+      ipAddress: p.ip_address ?? p.ipAddress,
+      tags: p.tags ?? [],
+      metadata: p.metadata ?? {},
+      status: p.status ?? 'unknown',
+      lastSeen: p.lastSeen ?? p.last_seen ?? '',
+      health: p.health,
+      createdAt: p.createdAt ?? '',
+      updatedAt: p.updatedAt ?? '',
+      configId: p.config_id ?? p.configId,
+      configVersion: p.config_version ?? p.configVersion,
+      configSource: p.config_source ?? p.configSource,
+      configAppliedAt: p.config_applied_at ?? p.configAppliedAt,
+    })) as Probe[];
   }
 
   // GET /probes/admin/:id
   async getProbeAdmin(id: string): Promise<Probe> {
-    const response: AxiosResponse<any> =
-      await this.client.get(`/probes/admin/${id}`);
-    return response.data as Probe;
+    const response: AxiosResponse<any> = await this.client.get(`/probes/admin/${id}`);
+    const p = response.data;
+    return {
+      id: p.id,
+      name: p.name,
+      version: p.version,
+      platform: p.platform,
+      arch: p.arch,
+      ipAddress: p.ip_address ?? p.ipAddress,
+      tags: p.tags ?? [],
+      metadata: p.metadata ?? {},
+      status: p.status ?? 'unknown',
+      lastSeen: p.lastSeen ?? p.last_seen ?? '',
+      health: p.health,
+      createdAt: p.createdAt ?? '',
+      updatedAt: p.updatedAt ?? '',
+      configId: p.config_id ?? p.configId,
+      configVersion: p.config_version ?? p.configVersion,
+      configSource: p.config_source ?? p.configSource,
+      configAppliedAt: p.config_applied_at ?? p.configAppliedAt,
+    } as Probe;
   }
 
   // GET /probes/admin/:id/health
@@ -361,21 +402,150 @@ class ApiService {
 
   // POST /probes/admin
   async createProbeAdmin(data: any): Promise<Probe> {
-    const response: AxiosResponse<any> =
-      await this.client.post('/probes/admin', data);
-    return response.data as Probe;
+    const response: AxiosResponse<any> = await this.client.post('/probes/admin', data);
+    const p = response.data?.probe ?? response.data;
+    return {
+      id: p.id,
+      name: p.name,
+      version: p.version,
+      platform: p.platform,
+      arch: p.arch,
+      ipAddress: p.ip_address ?? p.ipAddress,
+      tags: p.tags ?? [],
+      metadata: p.metadata ?? {},
+      status: p.status ?? 'unknown',
+      lastSeen: p.lastSeen ?? p.last_seen ?? '',
+      health: p.health,
+      createdAt: p.createdAt ?? '',
+      updatedAt: p.updatedAt ?? '',
+      configId: p.config_id ?? p.configId,
+      configVersion: p.config_version ?? p.configVersion,
+      configSource: p.config_source ?? p.configSource,
+      configAppliedAt: p.config_applied_at ?? p.configAppliedAt,
+    } as Probe;
   }
 
   // PUT /probes/admin/:id
   async updateProbeAdmin(id: string, data: any): Promise<Probe> {
-    const response: AxiosResponse<any> =
-      await this.client.put(`/probes/admin/${id}`, data);
-    return response.data as Probe;
+    const response: AxiosResponse<any> = await this.client.put(`/probes/admin/${id}`, data);
+    const p = response.data;
+    return {
+      id: p.id,
+      name: p.name,
+      version: p.version,
+      platform: p.platform,
+      arch: p.arch,
+      ipAddress: p.ip_address ?? p.ipAddress,
+      tags: p.tags ?? [],
+      metadata: p.metadata ?? {},
+      status: p.status ?? 'unknown',
+      lastSeen: p.lastSeen ?? p.last_seen ?? '',
+      health: p.health,
+      createdAt: p.createdAt ?? '',
+      updatedAt: p.updatedAt ?? '',
+      configId: p.config_id ?? p.configId,
+      configVersion: p.config_version ?? p.configVersion,
+      configSource: p.config_source ?? p.configSource,
+      configAppliedAt: p.config_applied_at ?? p.configAppliedAt,
+    } as Probe;
   }
 
   // DELETE /probes/admin/:id
   async deleteProbeAdmin(id: string): Promise<void> {
     await this.client.delete(`/probes/admin/${id}`);
+  }
+
+  // --- Frontend-managed build configurations & measurement tasks (stored via /config) ---
+
+  /**
+   * Load the active configuration and extract frontend-managed build configurations.
+   * We expect them under data.buildConfigs as an array.
+   */
+  async getBuildConfigurations(): Promise<BuildConfiguration[]> {
+    try {
+      const cfg = await this.getConfig();
+      const list = (cfg?.data?.buildConfigs ?? []) as BuildConfiguration[];
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Persist build configurations into the active configuration (data.buildConfigs).
+   * This uses PUT /config/{id} to update the single authoritative configuration.
+   */
+  async saveBuildConfigurations(configId: string, configs: BuildConfiguration[]): Promise<void> {
+    const current = await this.getConfig();
+    const updated: Configuration = {
+      ...current,
+      data: {
+        ...(current.data || {}),
+        buildConfigs: configs,
+      },
+    };
+    await this.updateConfiguration(configId || current.id, updated);
+  }
+
+  /**
+   * Load measurement tasks defined in configuration (data.measurementTasks).
+   */
+  async getMeasurementTasks(): Promise<MeasurementTask[]> {
+    try {
+      const cfg = await this.getConfig();
+      const list = (cfg?.data?.measurementTasks ?? []) as MeasurementTask[];
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Persist measurement tasks into the active configuration (data.measurementTasks).
+   */
+  async saveMeasurementTasks(configId: string, tasks: MeasurementTask[]): Promise<void> {
+    const current = await this.getConfig();
+    const updated: Configuration = {
+      ...current,
+      data: {
+        ...(current.data || {}),
+        measurementTasks: tasks,
+      },
+    };
+    await this.updateConfiguration(configId || current.id, updated);
+  }
+
+  /**
+   * Convenience helper to assign a build configuration to a set of probes by updating their metadata.
+   * This does NOT trigger backend /probes/:id/config-applied; probes report that themselves.
+   */
+  async assignBuildConfigToProbes(
+    buildConfigId: string,
+    probeIds: string[],
+    metadata: Partial<{
+      configId: string;
+      configVersion: number;
+      configSource: string;
+    }> = {}
+  ): Promise<void> {
+    const payload: any = {
+      metadata: {
+        ...(metadata.configId && { config_id: metadata.configId }),
+        ...(typeof metadata.configVersion === 'number' && {
+          config_version: metadata.configVersion,
+        }),
+        ...(metadata.configSource && { config_source: metadata.configSource }),
+        build_config_id: buildConfigId,
+      },
+    };
+
+    for (const id of probeIds) {
+      try {
+        await this.updateProbeAdmin(id, payload);
+      } catch {
+        // best-effort; errors for individual probes are ignored by this helper
+      }
+    }
   }
 }
 
