@@ -145,23 +145,22 @@ admin_web_active_connections 3
 	})
 	
 	// Register all API routes
-	apiRouter := router.Group("/api/v1")
-	{
-		// Authentication routes
-		api.RegisterAuthRoutes(apiRouter, authMiddleware)
-		
-		// Configuration routes
-		api.RegisterConfigRoutes(apiRouter, configManager, authMiddleware)
-		
-		// Probe routes
-		api.RegisterProbeRoutes(apiRouter, probeRegistry, configManager, authMiddleware)
-		
-		// Measurement routes
-		api.RegisterMeasurementRoutes(apiRouter, monitoringMgr, authMiddleware)
-		
-		// Monitoring routes
-		api.RegisterMonitoringRoutes(apiRouter, probeRegistry, monitoringMgr, authMiddleware)
-	}
+	apiRouter := router.Group("/api")
+	
+	// Authentication routes
+	api.RegisterAuthRoutes(apiRouter, authMiddleware)
+	
+	// Configuration routes
+	api.RegisterConfigRoutes(apiRouter, configManager, authMiddleware)
+	
+	// Probe routes
+	api.RegisterProbeRoutes(apiRouter, probeRegistry, configManager, authMiddleware)
+	
+	// Measurement routes
+	api.RegisterMeasurementRoutes(apiRouter, monitoringMgr, authMiddleware)
+	
+	// Monitoring routes
+	api.RegisterMonitoringRoutes(apiRouter, probeRegistry, monitoringMgr, authMiddleware)
 	
 	// WebSocket endpoints (basic implementation for future development)
 	ws := router.Group("/ws")

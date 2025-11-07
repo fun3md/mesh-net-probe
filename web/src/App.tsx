@@ -31,7 +31,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
   return children;
 };
 
-export const App: React.FC = () => {
+// 1) Ensure App is the default export to match main.tsx
+// If App is currently a named export (e.g. `export const App = ...`), change to:
+const App = () => {
   return (
     <Router>
       <Routes>
@@ -72,3 +74,5 @@ export const App: React.FC = () => {
     </Router>
   );
 };
+
+export default App;

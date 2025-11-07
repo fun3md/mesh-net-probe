@@ -1,6 +1,5 @@
 import { io, Socket } from 'socket.io-client';
 import type { Probe, Alert } from '@/types';
-import { apiService } from '@/services/api';
 
 // Extend the ImportMeta interface to include env
 declare global {

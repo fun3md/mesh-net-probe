@@ -12,7 +12,7 @@ const Login: React.FC = () => {
     setError('');
     
     try {
-      await login(credentials);
+      await login(credentials.username, credentials.password);
       // No redirect needed - the App.tsx will handle showing the main app
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed');

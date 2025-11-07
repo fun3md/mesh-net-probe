@@ -5,12 +5,9 @@ import type {
   Configuration,
   User,
   LoginRequest,
-  PaginatedResponse,
   DashboardStats,
   Alert,
-  AuthToken,
-  HealthStatus,
-  MeasurementStatistics
+  HealthStatus
 } from '@/types';
 
 // Extend the ImportMeta interface to include env

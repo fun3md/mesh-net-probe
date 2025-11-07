@@ -107,7 +107,8 @@ export function useAuth(): {
       }
       initialAuthCheckStarted = true;
 
-      const { token, user, isAuthenticated } = loadFromStorage();
+      const { token } = loadFromStorage();
+      console.debug('[useAuth] bootstrap: loaded token from storage', { hasToken: !!token });
 
       if (!token) {
         apiService.clearAuthToken();
@@ -118,6 +119,7 @@ export function useAuth(): {
           isAuthenticated: false,
           loading: false,
         });
+        console.debug('[useAuth] bootstrap: no token, unauthenticated');
         return;
       }
 
@@ -136,6 +138,7 @@ export function useAuth(): {
           isAuthenticated: true,
           loading: false,
         });
+        console.debug('[useAuth] bootstrap: /auth/me success, authenticated', { me });
       } catch (error: any) {
         // On 401 or any failure, treat as unauthenticated
         if (!isMounted) return;
@@ -148,6 +151,7 @@ export function useAuth(): {
           isAuthenticated: false,
           loading: false,
         });
+        console.debug('[useAuth] bootstrap: /auth/me failed, cleared auth', { error });
       }
     };
 
@@ -179,6 +183,7 @@ export function useAuth(): {
           isAuthenticated: true,
           loading: false,
         });
+        console.debug('[useAuth] login: success', { user });
       } catch (error) {
         // On failure, clear any stale state
         apiService.clearAuthToken();
@@ -190,6 +195,7 @@ export function useAuth(): {
           isAuthenticated: false,
           loading: false,
         });
+        console.debug('[useAuth] login: failed, cleared auth', { error });
         throw error;
       }
     },

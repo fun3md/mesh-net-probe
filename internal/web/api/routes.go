@@ -61,7 +61,6 @@ func RegisterAuthRoutes(router *gin.RouterGroup, authMiddleware *auth.Middleware
 
 // RegisterConfigRoutes registers configuration management routes backed by config.Manager.
 // All operations require authentication; mutating routes require admin/operator roles.
-// Phase 5.1: /config is fully authoritative via config.Manager; no local in-memory configs.
 func RegisterConfigRoutes(router *gin.RouterGroup, configManager config.Manager, authMiddleware *auth.Middleware) {
 	configGroup := router.Group("/config")
 
@@ -99,8 +98,6 @@ func RegisterConfigRoutes(router *gin.RouterGroup, configManager config.Manager,
 }
 
 // RegisterProbeRoutes registers probe management routes backed by ProbeRegistry.
-// Read operations require authentication; write/control operations require operator/admin.
-// Phase 5.1: Probes are authoritative via ProbeRegistry, not local maps.
 func RegisterProbeRoutes(router *gin.RouterGroup, probeRegistry *monitoring.ProbeRegistry, configManager config.Manager, authMiddleware *auth.Middleware) {
 	probeGroup := router.Group("/probes")
 
@@ -130,7 +127,7 @@ func RegisterProbeRoutes(router *gin.RouterGroup, probeRegistry *monitoring.Prob
 		// Heartbeat: in production requires JWT; in tests, no-op JWT via nil middleware
 		probeGroup.POST("/:id/heartbeat", handleProbeHeartbeat(probeRegistry))
 
-		// Probes report applied configuration (Phase 5.1 T097)
+		// Probes report applied configuration
 		probeGroup.POST("/:id/config-applied", handleProbeConfigApplied(probeRegistry))
 	}
 }
@@ -177,9 +174,9 @@ func handleLogin(authMiddleware *auth.Middleware) gin.HandlerFunc {
 			// Generate demo JWT token (in production, use proper JWT)
 			token := "demo-jwt-token-" + strconv.FormatInt(time.Now().Unix(), 10)
 			
-			c.JSON(200, gin.H{
+			c.JSON(http.StatusOK, gin.H{
 				"token":     token,
-				"user":      gin.H{"id": "1", "username": "admin", "role": "admin"},
+				"user":      map[string]string{"id": "1", "username": "admin", "role": "admin"},
 				"expiresAt": time.Now().Add(24 * time.Hour).Unix(),
 			})
 		} else {
