@@ -99,36 +99,50 @@ func RegisterConfigRoutes(router *gin.RouterGroup, configManager config.Manager,
 
 // RegisterProbeRoutes registers probe management routes backed by ProbeRegistry.
 func RegisterProbeRoutes(router *gin.RouterGroup, probeRegistry *monitoring.ProbeRegistry, configManager config.Manager, authMiddleware *auth.Middleware) {
-	probeGroup := router.Group("/probes")
-
-	// Production: enforce JWT
+	// Group 1: Admin/management routes (human operators via JWT + RBAC).
+	// Use /probes/admin prefix to avoid conflicts with probe self-registration endpoints.
+	managementGroup := router.Group("/probes/admin")
 	if authMiddleware != nil {
-		probeGroup.Use(authMiddleware.JWT())
+		managementGroup.Use(authMiddleware.JWT())
 	}
 
 	{
-		// Listing / details
-		probeGroup.GET("", handleListProbes(probeRegistry))
-		probeGroup.GET("/:id", handleGetProbe(probeRegistry))
-		probeGroup.GET("/:id/health", handleGetProbeHealth(probeRegistry))
+		// Listing / details for admins
+		managementGroup.GET("", handleListProbes(probeRegistry))
+		managementGroup.GET("/:id", handleGetProbe(probeRegistry))
+		managementGroup.GET("/:id/health", handleGetProbeHealth(probeRegistry))
 
 		if authMiddleware != nil {
-			// Registration and lifecycle - operator/admin only
-			probeGroup.POST("", auth.RequireOperator(), handleRegisterProbe(probeRegistry))
-			probeGroup.PUT("/:id", auth.RequireOperator(), handleUpdateProbe(probeRegistry))
-			probeGroup.DELETE("/:id", auth.RequireAdmin(), handleUnregisterProbe(probeRegistry))
+			// Management operations: restricted to operators/admins
+			managementGroup.POST("", auth.RequireOperator(), handleRegisterProbe(probeRegistry))
+			managementGroup.PUT("/:id", auth.RequireOperator(), handleUpdateProbe(probeRegistry))
+			managementGroup.DELETE("/:id", auth.RequireAdmin(), handleUnregisterProbe(probeRegistry))
 		} else {
-			// Tests: allow direct calls without role enforcement
-			probeGroup.POST("", handleRegisterProbe(probeRegistry))
-			probeGroup.PUT("/:id", handleUpdateProbe(probeRegistry))
-			probeGroup.DELETE("/:id", handleUnregisterProbe(probeRegistry))
+			// Tests or no-auth deployments: allow direct calls when no auth middleware is provided
+			managementGroup.POST("", handleRegisterProbe(probeRegistry))
+			managementGroup.PUT("/:id", handleUpdateProbe(probeRegistry))
+			managementGroup.DELETE("/:id", handleUnregisterProbe(probeRegistry))
 		}
+	}
 
-		// Heartbeat: in production requires JWT; in tests, no-op JWT via nil middleware
-		probeGroup.POST("/:id/heartbeat", handleProbeHeartbeat(probeRegistry))
+	// Group 2: Probe/agent routes (self-registration + lifecycle) via shared key.
+	// These MUST NOT require JWT; they are authenticated exclusively with PROBE_SHARED_API_KEY
+	// when authMiddleware is configured.
+	agentGroup := router.Group("/probes")
+	if authMiddleware != nil {
+		agentGroup.Use(authMiddleware.ProbeSharedKey())
+	}
 
-		// Probes report applied configuration
-		probeGroup.POST("/:id/config-applied", handleProbeConfigApplied(probeRegistry))
+	{
+		// Self-registration for probes using shared key.
+		// Only one POST /probes is registered here (admin registration moved to /probes/admin).
+		agentGroup.POST("", handleRegisterProbe(probeRegistry))
+
+		// Heartbeat: probe -> backend
+		agentGroup.POST("/:id/heartbeat", handleProbeHeartbeat(probeRegistry))
+
+		// Config-applied: probe -> backend
+		agentGroup.POST("/:id/config-applied", handleProbeConfigApplied(probeRegistry))
 	}
 }
 
@@ -171,9 +185,13 @@ func handleLogin(authMiddleware *auth.Middleware) gin.HandlerFunc {
 
 		// Demo authentication - in production, use proper auth system
 		if loginReq.Username == "admin" && loginReq.Password == "admin" {
-			// Generate demo JWT token (in production, use proper JWT)
-			token := "demo-jwt-token-" + strconv.FormatInt(time.Now().Unix(), 10)
-			
+			// Generate a real JWT token compatible with auth.Middleware JWT validation
+			token, err := authMiddleware.GenerateToken("1", "admin", "admin")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+				return
+			}
+
 			c.JSON(http.StatusOK, gin.H{
 				"token":     token,
 				"user":      map[string]string{"id": "1", "username": "admin", "role": "admin"},

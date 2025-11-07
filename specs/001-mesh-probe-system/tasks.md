@@ -364,6 +364,52 @@ description: "Task list template for feature implementation"
 
 ---
 
+## Phase 5.3: Probe Daemon/Agent Mode + Backend Integration
+
+**Goal**: Implement the probe as a long-running managed agent that:
+- Registers with the backend,
+- Periodically heartbeats and reports status/metrics,
+- Retrieves and applies configuration from the control plane without restart,
+- Remains aligned with Admin Web and ProbeRegistry contracts.
+
+### Implementation Tasks
+
+- [x] T280 [US1][US3] Implement probe daemon/agent entrypoint in `cmd/probe/main.go`:
+  - Add `serve` or `agent` subcommand that:
+    - Starts long-running loop.
+    - Initializes telemetry, config manager, and ProbeRegistry client as needed.
+- [x] T281 [US1][US3] Implement backend client for probe registration and heartbeat in `internal/monitoring` or `internal/cli`:
+  - Provide functions:
+    - `RegisterProbe(ctx, probeInfo)` to call backend (existing `/probes`/heartbeat pattern or future `/probes/register`).
+    - `SendHeartbeat(ctx, probeID, status)` targeting `/probes/:id/heartbeat`.
+  - Ensure TLS + auth headers align with config.
+- [x] T282 [US3] Implement config pull + live-apply loop in daemon mode:
+  - Periodically:
+    - Fetch effective configuration from backend/config control plane (`/config` or targeted probe-config endpoint).
+    - Apply updates to ICMP measurement engine without requiring process restart.
+  - On successful apply:
+    - Call `/probes/:id/config-applied` with version/source metadata.
+- [x] T283 [US1][US3] Wire status/metrics reporting from daemon to backend:
+  - Expose key probe metrics (health, active targets, error counts, measurement rates) via existing OTEL pipeline.
+  - Ensure ProbeRegistry-visible fields (status, lastSeen, config metadata) are updated via backend calls.
+- [x] T284 [US1][US3][US4] Ensure CLI one-shot mode remains intact and clearly separated:
+  - Keep existing one-shot commands for ad-hoc checks.
+  - Document that daemon/agent mode is the primary integration path for Admin Web and central control.
+
+### Tests
+
+- [x] T285 [Test][US1][US3] Extend `tests/contract/config_and_probe_admin_test.go`:
+  - Simulate a probe daemon registering, heartbeating, pulling config, and reporting config-applied.
+  - Assert ProbeRegistry and `/probes` endpoints reflect correct state.
+- [x] T286 [Test][US1][US3] Add integration test in `tests/integration/test_probe_daemon_agent.go`:
+  - Start backend + run probe daemon mode against it.
+  - Verify:
+    - Registration/heartbeat lifecycle.
+    - Config retrieval + live-apply.
+    - Status/metrics visibility in admin APIs.
+
+---
+
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 **Purpose**: Improvements that affect multiple user stories

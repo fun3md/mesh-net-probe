@@ -7,7 +7,7 @@ import NetworkConfiguration from '@/pages/NetworkConfiguration';
 import VisualConfigurator from '@/pages/VisualConfigurator';
 import OpenTelemetryConfiguration from '@/pages/OpenTelemetryConfiguration';
 import Layout from '@/components/Layout';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth, AuthProvider } from '@/hooks/useAuth';
 
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -35,43 +35,45 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
 // If App is currently a named export (e.g. `export const App = ...`), change to:
 const App = () => {
   return (
-    <Router>
-      <Routes>
-        {/* Public login route */}
-        <Route path="/login" element={<Login />} />
+    <AuthProvider>
+      <Router>
+        <Routes>
+          {/* Public login route */}
+          <Route path="/login" element={<Login />} />
 
-        {/* Protected application shell */}
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <Outlet />
-              </Layout>
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<Dashboard />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="targets" element={<Targets />} />
-          <Route path="config" element={<NetworkConfiguration />} />
-          <Route path="visual-configurator" element={<VisualConfigurator />} />
-          <Route path="otel-config" element={<OpenTelemetryConfiguration />} />
-        </Route>
+          {/* Protected application shell */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Outlet />
+                </Layout>
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="targets" element={<Targets />} />
+            <Route path="config" element={<NetworkConfiguration />} />
+            <Route path="visual-configurator" element={<VisualConfigurator />} />
+            <Route path="otel-config" element={<OpenTelemetryConfiguration />} />
+          </Route>
 
-        {/* Fallback: any unknown route -> guarded dashboard */}
-        <Route
-          path="*"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <Dashboard />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
-    </Router>
+          {/* Fallback: any unknown route -> guarded dashboard */}
+          <Route
+            path="*"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <Dashboard />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 };
 

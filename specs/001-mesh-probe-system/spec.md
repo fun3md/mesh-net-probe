@@ -106,6 +106,18 @@ System administrator manages probe configurations from a central datasource, ena
 - **FR-007**: System MUST maintain measurement accuracy and consistency regardless of deployment platform or architecture with maximum ±0.5% variance in timing measurements
 - **FR-008**: System MUST handle network failures gracefully and continue measurements when possible with automatic retry logic and connection failover
 - **FR-009**: System MUST provide structured logging for operational monitoring and troubleshooting with JSON-formatted logs at INFO, WARN, and ERROR levels
+- **FR-010**: System MUST authenticate probe connections to central datasource via API keys using HTTPS/TLS 1.3 with automatic certificate validation
+- **FR-011**: System MUST use a configuration management system (etcd v3.6+ or Consul 1.15+) for storing and managing probe configurations distributed across the mesh
+- **FR-012**: System MUST implement secure ICMP packet handling with proper TTL validation and packet size limits (max 1472 bytes data payload)
+- **FR-013**: System MUST encrypt all data in transit using TLS 1.3 for configuration management and telemetry export communications
+- **FR-014**: System MUST support measurement rates up to 1000 ICMP packets per second per probe with ≤1% packet loss under normal network conditions
+- **FR-015**: System MUST maintain ≤50MB memory footprint per probe instance regardless of measurement duration or target count
+- **FR-016**: System MUST support concurrent measurement of up to 100 targets per probe with individual target timeout configuration (1-300 seconds)
+- **FR-017**: System MUST implement automatic backpressure when network congestion is detected, reducing measurement rates to prevent network impact
+- **FR-018**: System MUST provide a probe CLI that can run one-shot commands and a long-running daemon/agent mode.
+- **FR-019**: In daemon/agent mode, each probe MUST register with the central API/backend on startup, periodically renew its registration/heartbeat, and expose its capabilities and identity.
+- **FR-020**: In daemon/agent mode, each probe MUST retrieve configuration updates from the central API/backend (or its configured control plane) and apply them without manual restarts.
+- **FR-021**: In daemon/agent mode, each probe MUST expose status and metrics to the central API/backend, including health, active targets, measurement rates, and error indicators, suitable for consumption by the admin web UI and observability stack.
 
 **Security Requirements**:
 - **FR-010**: System MUST authenticate probe connections to central datasource via API keys using HTTPS/TLS 1.3 with automatic certificate validation
@@ -128,6 +140,7 @@ System administrator manages probe configurations from a central datasource, ena
 - **MN-006**: System MUST implement inter-probe communication for real-time coordination of measurement schedules and result sharing with ≤100ms latency
 - **MN-007**: System MUST provide mesh-wide alerting where measurement failures or network issues detected by any probe are broadcast to all other probes in the mesh
 - **MN-008**: System MUST support probe mesh partitioning scenarios where network partitions are detected and handled gracefully with independent operation modes
+- **MN-009**: Mesh coordination operates under a single-tenant trust model where all probes are mutually trusted and governed by a shared control plane; cross-tenant isolation requirements are explicitly out of scope for this feature branch.
 
 **Accessibility Requirements**:
 - **AR-001**: System MUST provide CLI interface that supports screen readers with proper ARIA labels and semantic output formatting for command-line accessibility
@@ -142,6 +155,7 @@ System administrator manages probe configurations from a central datasource, ena
 - **Measurement Data**: Contains ICMP timing information, packet statistics, target information, timestamps with microsecond precision, and probe identification metadata
 - **Configuration Profile**: Defines probe behavior including target lists, measurement intervals, reporting settings, and operational parameters managed centrally
 - **Network Target**: Represents destinations for ICMP measurement including IP addresses, measurement frequency, timeout settings, and expected response characteristics
+- **Probe Registration**: Represents the registration record of a probe with the central API/backend, including unique probe ID, last heartbeat, supported capabilities, and current status.
 
 ## Success Criteria *(mandatory)*
 
@@ -210,3 +224,10 @@ System administrator manages probe configurations from a central datasource, ena
 - **ED-003**: Container runtime with multi-platform build support (Docker 20.10+ or compatible)
 - **ED-004**: Operating system kernel support for ICMP operations (Linux kernel 4.0+, macOS 10.12+, Windows 10+)
 - **ED-005**: Network infrastructure allowing ICMP traffic between probe containers and measurement targets
+
+## Clarifications
+
+### Session 2025-11-07
+
+- Q: For the distributed mesh coordination (MN-001–MN-008), what is the intended trust and isolation model between probes across different network segments and tenants? → A: All probes belong to a single trusted tenant; mesh coordination assumes mutual trust and shared control plane.
+- Q: How should the probe CLI and daemon/agent mode interact with the central backend for registration, configuration retrieval, and status/metrics reporting? → A: Probe provides both CLI and daemon modes; in daemon mode it registers with, pulls configuration from, and reports status/metrics to the central API/backend as its control plane.

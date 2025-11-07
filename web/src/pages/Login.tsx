@@ -1,23 +1,34 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { LogIn, Shield } from 'lucide-react';
+import { Navigate, useNavigate } from 'react-router-dom';
 
 const Login: React.FC = () => {
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
-  const { login, loading } = useAuth();
+  const { login, loading, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
     try {
+      // Wait for login to complete and auth state to be definitively set
       await login(credentials.username, credentials.password);
-      // No redirect needed - the App.tsx will handle showing the main app
+      
+      // Only navigate after login has definitively set the auth state to authenticated
+      // This eliminates the race condition where ProtectedRoute might see old state
+      navigate('/', { replace: true });
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed');
     }
   };
+
+  // If already authenticated (e.g. visiting /login with a valid session), redirect to dashboard.
+  if (!loading && isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">

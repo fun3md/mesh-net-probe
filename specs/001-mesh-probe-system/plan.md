@@ -23,6 +23,10 @@ This phase is part of the larger Distributed Mesh Probe System described in [`sp
 The goal of this plan is to:
 - Complete the Admin Web backend and SPA as a real, production-grade surface over the existing mesh probe capabilities.
 - Ensure all Admin Web contracts, flows, and UX remain fully aligned with the mesh probe system architecture and quality constraints from the initial plan.
+- Treat the probe CLI + daemon/agent as a first-class, API-managed component that:
+    - Registers with the backend,
+    - Retrieves configuration from the backend/config control plane,
+    - Reports status and metrics back to the backend for UI and observability consumption.
 
 ## Technical Context
 
@@ -173,6 +177,13 @@ Use internal/web/api/routes.go as the authoritative contract and close gaps betw
    - GET /probes/:id, DELETE /probes/:id, etc.
    - POST /probes/:id/heartbeat, POST /probes/:id/config-applied → used by probes for status/rollout tracking.
    - Action: Define normalized probe DTO in contracts to match web/src/types.Probe (align field names: ipAddress vs IPAddress, lastSeen, status, health).
+   - Action: Define and document the expected behavior for probe daemon/agent mode:
+     - On startup, probe registers with backend via POST /probes/:id/heartbeat (or dedicated /probes/register if introduced) including its identity and capabilities.
+     - Probe runs as a long-lived agent process that:
+       - Periodically sends heartbeats (/probes/:id/heartbeat) to maintain liveness.
+       - Fetches configuration (either via /config* endpoints or targeted probe configuration endpoints) and applies updates without restart.
+       - Reports config-application status via POST /probes/:id/config-applied.
+     - CLI one-shot invocations remain supported but are orthogonal to the daemon; daemon mode is the primary integration point for backend-driven control.
 
 4. Measurements:
    - /measurements, /measurements/:id, /measurements/statistics, /measurements/stream/:probe_id.
@@ -250,6 +261,14 @@ Define concrete refactor tasks (to be mirrored into tasks.md):
 
 - App initialization:
   - On app start: auth check → fetch basic health/dashboard data.
+
+- Probe daemon/agent integration:
+  - Define backend contract for probe registration and heartbeat (using existing /probes and heartbeat endpoints; add /probes/register if needed in future).
+  - Implement probe-side behavior (planned in probe CLI) so that:
+    - `probe` can run in daemon/agent mode, registering itself and keeping its status current in ProbeRegistry via backend APIs.
+    - Daemon mode periodically retrieves configuration from the backend/config control plane and applies changes without restart.
+    - Daemon mode exposes measurement status and key metrics via backend endpoints, enabling Admin Web to show real-time probe health and activity using the same APIs.
+  - Ensure these flows are covered by contract tests (config_and_probe_admin_test.go) and reflected in tasks.md as dedicated implementation tasks.
 
 ### 4. Tests and Observability Hooks
 

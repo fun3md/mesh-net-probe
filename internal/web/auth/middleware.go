@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,10 @@ type Middleware struct {
 	mu             sync.RWMutex
 	rateLimitMap   map[string]time.Time
 	allowedOrigins []string
+
+	// probeSharedKey is a shared secret used to authenticate probe/agent calls.
+	// It is loaded from the PROBE_SHARED_API_KEY environment variable.
+	probeSharedKey string
 }
 
 type Claims struct {
@@ -36,6 +41,7 @@ func NewMiddleware() *Middleware {
 			"http://localhost:5173",  // Vite dev server
 			"https://localhost:3001", // HTTPS dev server
 		},
+		probeSharedKey: strings.TrimSpace(os.Getenv("PROBE_SHARED_API_KEY")),
 	}
 }
 
@@ -52,14 +58,14 @@ func (m *Middleware) JWT() gin.HandlerFunc {
 		}
 
 		// Extract token from "Bearer <token>" format
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token == authHeader {
+		if !strings.HasPrefix(authHeader, "Bearer ") {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid authorization header format",
 			})
 			c.Abort()
 			return
 		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
 
 		// Validate token
 		claims, err := m.validateToken(token)
@@ -80,6 +86,66 @@ func (m *Middleware) JWT() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// ProbeSharedKey returns middleware that authenticates probes/agents
+// using a shared secret from PROBE_SHARED_API_KEY.
+//
+// Behavior:
+// - If PROBE_SHARED_API_KEY is NOT set, this middleware becomes a no-op (allows all).
+//   This is intentional for local/dev/test environments.
+// - If PROBE_SHARED_API_KEY is set, it expects:
+//     Authorization: Bearer <PROBE_SHARED_API_KEY>
+func (m *Middleware) ProbeSharedKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// If no shared key configured, do not enforce; let requests pass through.
+		if m.probeSharedKey == "" {
+			c.Next()
+			return
+		}
+
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "missing authorization header",
+			})
+			c.Abort()
+			return
+		}
+
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid authorization header format",
+			})
+			c.Abort()
+			return
+		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+
+		if subtleConstantTimeCompare(token, m.probeSharedKey) {
+			c.Set("probe_authenticated", true)
+			c.Next()
+			return
+		}
+
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "invalid probe shared key",
+		})
+		c.Abort()
+	}
+}
+
+// subtleConstantTimeCompare performs a constant-time comparison for two strings.
+func subtleConstantTimeCompare(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	// Simple constant-time loop; avoids importing crypto/subtle just for this.
+	var diff byte
+	for i := 0; i < len(a); i++ {
+		diff |= a[i] ^ b[i]
+	}
+	return diff == 0
 }
 
 // CORS creates CORS middleware

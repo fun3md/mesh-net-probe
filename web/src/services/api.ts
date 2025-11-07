@@ -22,8 +22,19 @@ class ApiService {
   private baseURL: string;
 
   constructor() {
-    this.baseURL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8080/api';
-    
+    // Prefer explicit env; otherwise:
+    // - If running under Vite dev (localhost:3000), talk to backend at http://localhost:8080/api
+    // - If running from the same origin (production), use relative /api
+    const envBase = (import.meta as any).env?.VITE_API_BASE_URL;
+
+    if (envBase) {
+      this.baseURL = envBase;
+    } else if (typeof window !== 'undefined' && window.location.port === '3000') {
+      this.baseURL = 'http://localhost:8080/api';
+    } else {
+      this.baseURL = '/api';
+    }
+
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: 30000,
@@ -128,9 +139,9 @@ class ApiService {
 
   // Probe endpoints
 
-  // Backend: GET /probes → { probes: Probe[] }
+  // Backend: GET /probes/admin → { probes: Probe[] }
   async getProbes(): Promise<Probe[]> {
-    const response: AxiosResponse<{ probes: any[] }> = await this.client.get('/probes');
+    const response: AxiosResponse<{ probes: any[] }> = await this.client.get('/probes/admin');
     const probes = response.data.probes ?? [];
 
     // Normalize snake_case fields from backend into Probe type expectations.
@@ -152,7 +163,7 @@ class ApiService {
   }
 
   async getProbe(id: string): Promise<Probe> {
-    const response: AxiosResponse<any> = await this.client.get(`/probes/${id}`);
+    const response: AxiosResponse<any> = await this.client.get(`/probes/admin/${id}`);
     const p = response.data;
     return {
       id: p.id,
@@ -193,7 +204,7 @@ class ApiService {
   }
 
   async getProbeHealth(id: string): Promise<HealthStatus> {
-    const response: AxiosResponse<any> = await this.client.get(`/probes/${id}/health`);
+    const response: AxiosResponse<any> = await this.client.get(`/probes/admin/${id}/health`);
     // Backend shape: { probe_id, health, status, last_seen }
     // For now, pass through as-is; callers expecting HealthStatus should be adjusted accordingly in Phase 5.2.
     return response.data as HealthStatus;
@@ -288,7 +299,7 @@ class ApiService {
     const response: AxiosResponse<{ alerts: any[] }> =
       await this.client.get('/monitoring/alerts');
     const alerts = response.data.alerts ?? [];
-    return alerts.map(a => ({
+    return alerts.map((a) => ({
       id: a.id,
       type: a.type ?? 'alert',
       severity: a.severity,
@@ -322,6 +333,49 @@ class ApiService {
 
   isAuthenticated(): boolean {
     return !!localStorage.getItem('auth_token');
+  }
+
+  // Probe admin helpers (class methods) – ensure they use /probes/admin
+
+  // GET /probes/admin → { probes: Probe[] }
+  async getProbesAdmin(): Promise<Probe[]> {
+    const response: AxiosResponse<{ probes: any[] }> =
+      await this.client.get('/probes/admin');
+    const probes = response.data.probes ?? [];
+    return probes as Probe[];
+  }
+
+  // GET /probes/admin/:id
+  async getProbeAdmin(id: string): Promise<Probe> {
+    const response: AxiosResponse<any> =
+      await this.client.get(`/probes/admin/${id}`);
+    return response.data as Probe;
+  }
+
+  // GET /probes/admin/:id/health
+  async getProbeHealthAdmin(id: string): Promise<any> {
+    const response: AxiosResponse<any> =
+      await this.client.get(`/probes/admin/${id}/health`);
+    return response.data;
+  }
+
+  // POST /probes/admin
+  async createProbeAdmin(data: any): Promise<Probe> {
+    const response: AxiosResponse<any> =
+      await this.client.post('/probes/admin', data);
+    return response.data as Probe;
+  }
+
+  // PUT /probes/admin/:id
+  async updateProbeAdmin(id: string, data: any): Promise<Probe> {
+    const response: AxiosResponse<any> =
+      await this.client.put(`/probes/admin/${id}`, data);
+    return response.data as Probe;
+  }
+
+  // DELETE /probes/admin/:id
+  async deleteProbeAdmin(id: string): Promise<void> {
+    await this.client.delete(`/probes/admin/${id}`);
   }
 }
 
