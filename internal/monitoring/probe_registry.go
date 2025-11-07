@@ -8,19 +8,29 @@ import (
 
 // Probe represents a registered probe in the system
 type Probe struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Version     string                 `json:"version"`
-	Platform    string                 `json:"platform"`
-	Arch        string                 `json:"arch"`
-	IPAddress   string                 `json:"ip_address"`
-	Tags        []string               `json:"tags"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	Status      ProbeStatus            `json:"status"`
-	LastSeen    time.Time              `json:"last_seen"`
-	Health      *HealthStatus          `json:"health,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Version   string                 `json:"version"`
+	Platform  string                 `json:"platform"`
+	Arch      string                 `json:"arch"`
+	IPAddress string                 `json:"ip_address"`
+	Tags      []string               `json:"tags"`
+	Metadata  map[string]interface{} `json:"metadata"`
+
+	// Status and health
+	Status   ProbeStatus   `json:"status"`
+	LastSeen time.Time     `json:"last_seen"`
+	Health   *HealthStatus `json:"health,omitempty"`
+
+	// Lifecycle
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Configuration application tracking (Phase 5.1: T096/T097)
+	ConfigID      string    `json:"config_id,omitempty"`       // last applied configuration ID
+	ConfigVersion int       `json:"config_version,omitempty"`  // last applied configuration version
+	ConfigSource  string    `json:"config_source,omitempty"`   // provider/source used
+	ConfigApplied time.Time `json:"config_applied_at,omitempty"` // when configuration was applied
 }
 
 // ProbeStatus represents the current status of a probe
@@ -210,6 +220,34 @@ func (r *ProbeRegistry) OnlineProbeCount() int {
 func (r *ProbeRegistry) UpdateProbeMetadata(probeID string, metadata map[string]interface{}) error {
 	return r.UpdateProbe(probeID, func(probe *Probe) error {
 		probe.Metadata = metadata
+		return nil
+	})
+}
+
+// UpdateProbeConfig records configuration application metadata for a probe.
+// Used by /probes/:id/config-applied endpoint for rollout tracking.
+func (r *ProbeRegistry) UpdateProbeConfig(
+	probeID string,
+	configID string,
+	configVersion int,
+	configSource string,
+	appliedAt time.Time,
+) error {
+	return r.UpdateProbe(probeID, func(probe *Probe) error {
+		if probe.Metadata == nil {
+			probe.Metadata = make(map[string]interface{})
+		}
+		probe.ConfigID = configID
+		probe.ConfigVersion = configVersion
+		probe.ConfigSource = configSource
+		probe.ConfigApplied = appliedAt
+
+		// Also mirror into metadata for easier querying/export if needed.
+		probe.Metadata["config_id"] = configID
+		probe.Metadata["config_version"] = configVersion
+		probe.Metadata["config_source"] = configSource
+		probe.Metadata["config_applied_at"] = appliedAt
+
 		return nil
 	})
 }

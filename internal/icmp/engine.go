@@ -223,193 +223,72 @@ type TraceHop struct {
 	ErrorMessage string
 }
 
-// TraceRoute performs a traceroute to the target using real network discovery when possible
+// TraceRoute performs a traceroute to the target using real TTL-based probing only.
+// No simulated or hardcoded hops are used; if a hop cannot be resolved, it is
+// reported as an unsuccessful probe (e.g. "* * *" at CLI level).
 func (e *Engine) TraceRoute(ctx context.Context, target net.IP, maxTTL int) ([]TraceHop, error) {
-	hops := []TraceHop{}
+	var hops []TraceHop
 	
-	// First, perform a direct ping to get baseline RTT
-	baselineMeasurement, err := e.Ping(ctx, target)
-	if err != nil {
-		return nil, fmt.Errorf("failed to ping target: %w", err)
-	}
-	
-	// Try to get real routing information
-	realHops, err := e.getRealNetworkHops(target)
-	if err == nil && len(realHops) > 0 {
-		// We found real hops! Use them
-		hops = append(hops, realHops...)
-	} else {
-		// No routing table access, create a realistic approximation
-		hops = e.createRealisticRoute(target, baselineMeasurement)
-	}
-	
-	return hops, nil
-}
-
-// getRealNetworkHops attempts to discover real intermediate hops using routing table analysis
-func (e *Engine) getRealNetworkHops(target net.IP) ([]TraceHop, error) {
-	hops := []TraceHop{}
-	
-	// Parse routing table to find potential intermediate hops
-	routeInfo := e.parseRoutingTable(target)
-	
-	// Add discovered hops
-	for _, hopIP := range routeInfo {
+	for ttl := 1; ttl <= maxTTL; ttl++ {
+		// Use real TTL-based probing via sendTTLProbe
+		probeResult, err := e.sendTTLProbe(target, ttl)
+		
 		hop := TraceHop{
-			TTL:       len(hops) + 1,
-			IP:        hopIP,
-			Host:      "",
-			RTT:       0, // Will be measured
-			Success:   false,
-			ErrorCode: types.ICMPErrTimeout,
+			TTL:          ttl,
+			IP:           nil,
+			Host:         "",
+			RTT:          0,
+			Success:      false,
+			ErrorCode:    types.ICMPErrTimeout,
+			ErrorMessage: "",
 		}
 		
-		// Try to resolve hostname for this hop
-		if names, err := net.LookupAddr(hop.IP.String()); err == nil && len(names) > 0 {
-			hop.Host = names[0]
+		if err != nil {
+			// Real probe failed; expose real failure without fabricating hops
+			hop.ErrorMessage = err.Error()
 		} else {
-			hop.Host = hop.IP.String()
-		}
-		
-		// Measure RTT to this hop
-		if e.verbose {
-			log.Printf("Measuring RTT to hop %s: %s", hop.IP.String(), hop.Host)
-		}
-		
-		hopRTT, err := e.measureHopRTT(hop.IP)
-		if err == nil {
-			hop.RTT = hopRTT
-			hop.Success = true
-			hop.ErrorCode = types.ICMPErrNoError
-		} else {
-			hop.RTT = 10 * time.Millisecond // Estimated
-			hop.Success = false
-			hop.ErrorMessage = fmt.Sprintf("measurement failed: %v", err)
-		}
-		
-		hops = append(hops, hop)
-	}
-	
-	return hops, nil
-}
-
-// createRealisticRoute creates a realistic route approximation using network knowledge
-func (e *Engine) createRealisticRoute(target net.IP, baselineMeasurement *types.MeasurementData) []TraceHop {
-	hops := []TraceHop{}
-	
-	// Get local interface information (not used in this simplified version)
-	if _, err := net.Interfaces(); err != nil {
-		return hops
-	}
-	
-	// Find default gateway from routing table
-	defaultGateway := e.getDefaultGateway()
-	
-	// Add first hop (local gateway) if found
-	if defaultGateway != nil {
-		hop := TraceHop{
-			TTL:       1,
-			IP:        defaultGateway,
-			Host:      "",
-			RTT:       baselineMeasurement.RTT / 10, // Estimated first hop latency
-			Success:   true,
-			ErrorCode: types.ICMPErrNoError,
-		}
-		
-		// Try to resolve hostname for gateway
-		if names, err := net.LookupAddr(hop.IP.String()); err == nil && len(names) > 0 {
-			hop.Host = names[0]
-		} else {
-			hop.Host = hop.IP.String()
-		}
-		
-		hops = append(hops, hop)
-	}
-	
-	// Add a few more realistic hops based on the target network
-	// This is a best-effort approximation since we can't do real TTL-based discovery
-	
-	// Check if target is in a known network range
-	if target.IsPrivate() {
-		// Local network - add a few logical hops
-		routerIP := net.ParseIP("192.168.1.1")
-		if !routerIP.Equal(defaultGateway) {
-			hop := TraceHop{
-				TTL:       len(hops) + 1,
-				IP:        routerIP,
-				Host:      "router.local",
-				RTT:       baselineMeasurement.RTT / 5,
-				Success:   true,
-				ErrorCode: types.ICMPErrNoError,
-			}
-			hops = append(hops, hop)
-		}
-	} else {
-		// Internet destination - add ISP and backbone hops
-		// These are realistic examples based on typical ISP networks
-		ispRouters := []string{
-			"192.168.111.254",    // Local gateway (common in many networks)
-			"62.155.247.66",      // Typical ISP gateway format
-			"62.154.4.226",       // Regional ISP hop
-			"80.150.170.30",      // Backbone hop
-			"209.85.142.69",      // Google services hop
-			"172.253.66.137",     // Final Google edge hop
-		}
-		
-		for i, routerIPStr := range ispRouters {
-			routerIP := net.ParseIP(routerIPStr)
-			if routerIP != nil && !routerIP.Equal(defaultGateway) {
-				hop := TraceHop{
-					TTL:       len(hops) + 1,
-					IP:        routerIP,
-					Host:      "",
-					RTT:       time.Duration(float64(baselineMeasurement.RTT) * float64(i+2) / float64(len(ispRouters)+1)),
-					Success:   true,
-					ErrorCode: types.ICMPErrNoError,
-				}
-				
-				// Try to resolve hostname
+			hop.IP = probeResult.RouterIP
+			hop.RTT = probeResult.RTT
+			hop.Success = probeResult.Success
+			hop.ErrorCode = probeResult.ErrorCode
+			hop.ErrorMessage = probeResult.ErrorMessage
+			
+			// Perform reverse DNS lookup only for successful hops
+			if hop.Success && hop.IP != nil {
 				if names, err := net.LookupAddr(hop.IP.String()); err == nil && len(names) > 0 {
 					hop.Host = names[0]
 				} else {
-					hop.Host = "" // Leave empty if DNS resolution fails
+					hop.Host = hop.IP.String()
 				}
-				
-				hops = append(hops, hop)
 			}
-		}
-	}
-	
-	// Add final destination
-	if !hops[len(hops)-1].IP.Equal(target) {
-		hop := TraceHop{
-			TTL:       len(hops) + 1,
-			IP:        target,
-			Host:      "",
-			RTT:       baselineMeasurement.RTT,
-			Success:   baselineMeasurement.Success,
-			ErrorCode: baselineMeasurement.ErrorCode,
-		}
-		
-		// Try to resolve hostname for destination
-		if names, err := net.LookupAddr(hop.IP.String()); err == nil && len(names) > 0 {
-			hop.Host = names[0]
-		} else {
-			hop.Host = target.String()
 		}
 		
 		hops = append(hops, hop)
+		
+		// Stop once destination is confirmed reached by real probe
+		if probeResult != nil && probeResult.ReachedDestination {
+			break
+		}
 	}
 	
-	return hops
+	return hops, nil
 }
 
-// measureHopRTT measures RTT to a specific hop
+// getRealNetworkHops is deprecated. Real traceroute now relies solely on TTL-based probes.
+// Kept only to avoid breaking API; always returns no hops.
+func (e *Engine) getRealNetworkHops(target net.IP) ([]TraceHop, error) {
+	return nil, fmt.Errorf("getRealNetworkHops is deprecated; use TraceRoute TTL-based probing instead")
+}
+
+// createRealisticRoute is deprecated. Traceroute no longer fabricates paths.
+// Retained only for backward compatibility; always returns an empty slice.
+func (e *Engine) createRealisticRoute(target net.IP, baselineMeasurement *types.MeasurementData) []TraceHop {
+	return []TraceHop{}
+}
+
+// measureHopRTT is deprecated; real hop timing is derived from TTL-based probes.
 func (e *Engine) measureHopRTT(hopIP net.IP) (time.Duration, error) {
-	// For now, we can't actually measure RTT to arbitrary intermediate routers
-	// because we can't target them specifically without TTL manipulation
-	// Return an estimated value
-	return 10 * time.Millisecond, fmt.Errorf("RTT measurement to intermediate hops not supported")
+	return 0, fmt.Errorf("measureHopRTT is deprecated; use TTL-based probing")
 }
 
 // getLocalGatewayIP attempts to determine the local gateway IP
@@ -422,105 +301,51 @@ func (e *Engine) getLocalGatewayIP() net.IP {
 	return nil
 }
 
-// performMultiplePings performs multiple pings to analyze timing patterns
-func (e *Engine) performMultiplePings(target net.IP, count int) ([]*types.MeasurementData, error) {
-	var measurements []*types.MeasurementData
-	
+// PingBatch performs multiple pings to the same target and returns all measurements.
+// This is used by tests and benchmarks and is a thin wrapper over Ping with no simulation.
+func (e *Engine) PingBatch(ctx context.Context, target net.IP, count int) ([]*types.MeasurementData, error) {
+	if count <= 0 {
+		return nil, fmt.Errorf("count must be > 0")
+	}
+
+	measurements := make([]*types.MeasurementData, 0, count)
+
 	for i := 0; i < count; i++ {
-		measurement, err := e.Ping(context.Background(), target)
+		select {
+		case <-ctx.Done():
+			return measurements, ctx.Err()
+		default:
+		}
+
+		m, err := e.Ping(ctx, target)
 		if err != nil {
+			// Return partial results plus error so callers see real behavior; do not fabricate.
 			return measurements, err
 		}
-		measurements = append(measurements, measurement)
-		
-		// Small delay between pings
-		time.Sleep(100 * time.Millisecond)
+
+		measurements = append(measurements, m)
+
+		// Respect engine interval if configured.
+		if e.interval > 0 && i != count-1 {
+			time.Sleep(e.interval)
+		}
 	}
-	
+
 	return measurements, nil
 }
 
-// estimateIntermediateHop uses timing analysis to estimate if there's an intermediate hop
+// estimateIntermediateHop is deprecated; traceroute no longer fabricates intermediate hops.
 func (e *Engine) estimateIntermediateHop(measurements []*types.MeasurementData, ttl int, baselineRTT time.Duration) (TraceHop, bool) {
-	if len(measurements) == 0 {
-		return TraceHop{}, false
-	}
-	
-	// Calculate average RTT
-	var totalRTT time.Duration
-	var successful int
-	for _, m := range measurements {
-		if m.Success {
-			totalRTT += m.RTT
-			successful++
-		}
-	}
-	
-	if successful == 0 {
-		return TraceHop{}, false
-	}
-	
-	// Use timing heuristics to estimate intermediate hop
-	// For a simple implementation, assume linear progression of RTT
-	estimatedRTT := time.Duration(float64(baselineRTT) * float64(ttl) / float64(10))
-	
-	// Create estimated hop with a simulated IP address pattern
-	estimatedIP := net.ParseIP(fmt.Sprintf("192.168.100.%d", ttl))
-	if estimatedIP == nil {
-		estimatedIP = net.ParseIP("0.0.0.0")
-	}
-	
-	hop := TraceHop{
-		TTL:       ttl,
-		IP:        estimatedIP,
-		Host:      fmt.Sprintf("hop-%d.local", ttl),
-		RTT:       estimatedRTT,
-		Success:   true,
-		ErrorCode: types.ICMPErrNoError,
-	}
-	
-	return hop, true
+	return TraceHop{}, false
 }
 
-// parseRoutingTable parses system routing table to find intermediate hops
+// parseRoutingTable is deprecated; traceroute no longer uses routing table heuristics.
 func (e *Engine) parseRoutingTable(target net.IP) []net.IP {
-	var hops []net.IP
-	
-	// This is a simplified implementation
-	// In a real implementation, this would parse system routing tables
-	// For now, return empty slice to indicate no routing table access
-	return hops
+	return nil
 }
 
-// getDefaultGateway attempts to determine the default gateway
+// getDefaultGateway is deprecated; traceroute no longer infers hops from hardcoded gateways.
 func (e *Engine) getDefaultGateway() net.IP {
-	// Try to get default gateway from routing table
-	// This is platform-specific and may not work on all systems
-	// For Windows, this would involve parsing 'route print' output
-	// For now, return nil to indicate we couldn't determine gateway
-	
-	// Common default gateway patterns
-	commonGateways := []string{
-		"192.168.1.1",
-		"192.168.0.1",
-		"192.168.111.254",
-		"10.0.0.1",
-		"172.16.0.1",
-	}
-	
-	// Test if any of these are reachable
-	for _, gwIP := range commonGateways {
-		ip := net.ParseIP(gwIP)
-		if ip != nil {
-			// Try a quick ping to see if this gateway is responsive
-			// If it works, it's likely our default gateway
-			testMeasurement, err := e.Ping(context.Background(), ip)
-			if err == nil && testMeasurement.Success {
-				return ip
-			}
-		}
-	}
-	
 	return nil
 }
 

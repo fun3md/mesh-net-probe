@@ -185,20 +185,34 @@ func sanitizeNetworkInput(input string) bool {
 		return false
 	}
 
-	// Check for potentially dangerous characters
+	// Check for potentially dangerous characters to mitigate injection attacks
 	dangerousChars := []string{";", "&", "|", "<", ">", "'", "\"", "`", "$(", "${"}
 	for _, char := range dangerousChars {
-		if contains(input, char) {
+		if strings.Contains(input, char) {
 			return false
 		}
 	}
 
-	// Basic IP validation
+	// Basic IP validation.
+	// If this is a syntactically valid IP, accept.
 	if ip := net.ParseIP(input); ip != nil {
 		return true
 	}
 
-	// Basic hostname validation
+	// If the input looks like an IP literal (only digits and dots)
+	// but net.ParseIP returned nil, then reject as invalid IP-like input.
+	isIPLike := true
+	for _, ch := range input {
+		if (ch < '0' || ch > '9') && ch != '.' {
+			isIPLike = false
+			break
+		}
+	}
+	if isIPLike {
+		return false
+	}
+
+	// Basic hostname validation for non IP-like inputs
 	return isValidHostname(input)
 }
 

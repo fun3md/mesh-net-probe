@@ -225,6 +225,27 @@ description: "Task list template for feature implementation"
 - Compilation Test: ✅ Admin web backend compiles and runs successfully
 
 ---
+## Phase 5.1: User Story 3 - Centralized Configuration Enhancements (Review + Hardening)
+
+**Goal**: Align implementation of centralized configuration management and mesh-wide control with the designed architecture by replacing demo layers, enforcing versioned/authoritative behavior, and improving observability and security.
+
+### Implementation Tasks
+
+- [ ] T093 [US3] Replace in-memory configuration storage in `internal/web/api/routes.go` with `config.Manager` integration for all `/config` endpoints, ensuring reads/writes go through the centralized providers (file/etcd/Consul) instead of local maps.
+- [ ] T094 [US3] Implement `GET /config/status` endpoint in `internal/web/api/routes.go` exposing `ManagerStatus` from `config.Manager` (provider health, update counts, last seen, health score) for operational visibility.
+- [ ] T095 [US3] Refactor `/probes` handlers in `internal/web/api/routes.go` to use `internal/monitoring/ProbeRegistry` instead of the local `probes` map, ensuring a single authoritative registry for probe identity, status, and metadata.
+- [ ] T096 [US3] Extend `internal/monitoring/probe_registry.go` to track applied configuration metadata per probe (e.g. `ConfigVersion`, `ConfigSource`, `ConfigAppliedAt`) and expose it via existing listing/get APIs.
+- [ ] T097 [US3] Add `/probes/:id/config-applied` endpoint in `internal/web/api/routes.go` that allows probes to report the configuration version/source they have successfully applied, updating `ProbeRegistry` accordingly for rollout tracking.
+- [ ] T098 [US3] Enhance `shouldAcceptConfiguration` in `internal/config/manager_impl.go` to use version-aware and provider-priority-aware rules (e.g. reject stale versions, prefer higher-priority providers) while remaining backward compatible.
+- [ ] T099 [US3] Add structured logging and metrics around configuration lifecycle in `internal/config/manager_impl.go` (initialization, provider failures, accepted/rejected updates, reloads) and expose propagation/health metrics via existing telemetry.
+- [ ] T100 [US3] Protect configuration management and probe control endpoints (`/config`, `/config/status`, `/config/propagate`, critical `/probes` operations) with existing auth middleware and role-based checks to prevent unauthorized central changes.
+- [ ] T101 [US3] Update or add tests in `tests/contract/` and `tests/integration/` to validate:
+  - API now uses `config.Manager` and `ProbeRegistry`
+  - configuration acceptance rules (version/priority)
+  - probe-reported config version tracking
+  - `/config/status` and security constraints on central operations.
+
+---
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 

@@ -42,6 +42,15 @@ func WithConfigurationHandler(handler ConfigurationHandler) ManagerOption {
 	}
 }
 
+// WithStatus initializes a custom ManagerStatus (optional hook point)
+func WithStatus(status *ManagerStatus) ManagerOption {
+return func(m *defaultManager) {
+	if status != nil {
+		m.status = status
+	}
+}
+}
+
 // NewManager creates a new configuration manager
 func NewManager(options ...ManagerOption) Manager {
 	m := &defaultManager{
@@ -130,6 +139,9 @@ func (m *defaultManager) ReloadConfiguration(ctx context.Context) error {
 
 // GetStatus returns the health status of all configuration sources
 func (m *defaultManager) GetStatus(ctx context.Context) (*ManagerStatus, error) {
+	m.configMutex.RLock()
+	defer m.configMutex.RUnlock()
+
 	// Update health scores for all providers
 	healthyCount := 0
 	totalCount := len(m.providers)
@@ -144,6 +156,13 @@ func (m *defaultManager) GetStatus(ctx context.Context) (*ManagerStatus, error) 
 
 	if totalCount > 0 {
 		m.status.HealthScore = float64(healthyCount) / float64(totalCount)
+	}
+
+	// Track last update metadata
+	m.status.LastUpdate = m.lastUpdate
+	m.status.UpdateCount = m.updateCount
+	if m.config != nil {
+		m.status.CurrentConfigID = m.config.ID
 	}
 
 	return m.status, nil
@@ -198,7 +217,7 @@ func (m *defaultManager) loadInitialConfiguration() error {
 	}
 
 	// Load configuration from the best provider
-	config, err := bestProvider.Get(m.ctx)
+	cfg, err := bestProvider.Get(m.ctx)
 	if err != nil {
 		status := m.status.Sources[bestName]
 		status.LastError = fmt.Sprintf("load failed: %v", err)
@@ -206,9 +225,9 @@ func (m *defaultManager) loadInitialConfiguration() error {
 		return fmt.Errorf("failed to load configuration from %s: %w", bestName, err)
 	}
 
-	// Update configuration
+	// Update configuration (authoritative from best provider)
 	m.configMutex.Lock()
-	m.config = config
+	m.config = cfg
 	m.updateCount++
 	m.lastUpdate = time.Now()
 	m.configMutex.Unlock()
@@ -223,7 +242,7 @@ func (m *defaultManager) loadInitialConfiguration() error {
 
 	// Notify handler
 	if m.handler != nil {
-		m.handler.HandleConfigurationUpdate(m.ctx, config, bestName)
+		_ = m.handler.HandleConfigurationUpdate(m.ctx, cfg, bestName)
 	}
 
 	return nil
@@ -290,10 +309,51 @@ func (h *providerHandler) HandleConfigurationError(ctx context.Context, source s
 	}
 }
 
-// shouldAcceptConfiguration determines if a configuration update should be accepted
-func (h *providerHandler) shouldAcceptConfiguration(config *types.Configuration) bool {
-	// For now, accept all updates
-	// In a more sophisticated implementation, you might check version numbers,
-	// apply conflict resolution, etc.
-	return true
+// shouldAcceptConfiguration determines if a configuration update should be accepted.
+// Phase 5.1: incorporate version awareness and provider priority while remaining backward compatible.
+func (h *providerHandler) shouldAcceptConfiguration(newCfg *types.Configuration) bool {
+	m := h.manager
+
+	// No existing config: accept first valid config.
+	m.configMutex.RLock()
+	current := m.config
+	m.configMutex.RUnlock()
+	if current == nil || current.ID == "" {
+		return true
+	}
+
+	// If new config has no version metadata, accept (backward compatibility).
+	if newCfg == nil || newCfg.Version == 0 {
+		return true
+	}
+
+	// If current has no version, but new has: accept upgrade.
+	if current.Version == 0 {
+		return true
+	}
+
+	// Prefer higher version numbers.
+	if newCfg.Version > current.Version {
+		return true
+	}
+	if newCfg.Version < current.Version {
+		// Reject clearly stale versions.
+		return false
+	}
+
+	// If versions equal, prefer configuration from higher-priority provider.
+	newPriority := m.getProviderPriority(h.providerName)
+	currentSourcePriority := 0
+
+	if m.status != nil && m.status.CurrentConfigID == current.ID {
+		// Try to infer current provider priority from sources metadata.
+		for _, s := range m.status.Sources {
+			if s.Healthy && s.Enabled && s.Priority > currentSourcePriority {
+				currentSourcePriority = s.Priority
+			}
+		}
+	}
+
+	// Accept if this provider has equal or higher priority.
+	return newPriority >= currentSourcePriority
 }

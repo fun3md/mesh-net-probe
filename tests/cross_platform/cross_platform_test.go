@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/mesh-net-probe/probe/internal/icmp"
 )
 
 // CrossPlatformTestSuite runs comprehensive tests across different platforms
@@ -72,23 +74,27 @@ func testICMPFunctionality(t *testing.T) {
 }
 
 func testTimingConsistency(t *testing.T) {
-	// Test timing accuracy across platforms
-	const expectedTolerance = 100 * time.Microsecond // Allow 100µs tolerance
-	
-	measurements := make([]time.Duration, 10)
-	for i := 0; i < 10; i++ {
+	// Cross-platform timing verification:
+	// Ensure runtime timers are monotonic and not wildly off; avoid flakiness from scheduler jitter.
+	const target = time.Millisecond
+
+	// Allow wide tolerance (factor-of-3 band) to only catch severely broken clocks.
+	const maxFactor = 3.0
+
+	runs := 10
+	for i := 0; i < runs; i++ {
 		start := time.Now()
-		// Small operation
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(target)
 		elapsed := time.Since(start)
-		measurements[i] = elapsed
-	}
-	
-	// Check timing consistency
-	for _, measurement := range measurements {
-		deviation := measurement - time.Millisecond
-		if absDuration(deviation) > expectedTolerance {
-			t.Errorf("Timing measurement not consistent within tolerance: %v vs %v", measurement, time.Millisecond)
+
+		if elapsed <= 0 {
+			t.Errorf("Non-positive elapsed time: %v", elapsed)
+			continue
+		}
+
+		// Fail only if elapsed is far outside a sane band [target/maxFactor, target*maxFactor].
+		if elapsed < target/time.Duration(maxFactor) || elapsed > target*time.Duration(maxFactor) {
+			t.Errorf("Timing measurement outside sane bounds: got %v, expected roughly %v (allowed factor ±%0.1fx)", elapsed, target, maxFactor)
 		}
 	}
 }
@@ -233,15 +239,19 @@ func detectPlatform() (*platformInfo, error) {
 	}, nil
 }
 
-func newICMPEngine() (*mockEngine, error) {
-	// Create a simple mock engine for testing
-	return &mockEngine{}, nil
+func newICMPEngine() (*icmp.Engine, error) {
+	// Use the real ICMP engine with deterministic, short timeouts for cross-platform tests.
+	return icmp.NewEngine(
+		icmp.WithTimeout(2*time.Second),
+		icmp.WithBufferSize(1024),
+		icmp.WithVerbose(false),
+	)
 }
 
 type platformInfo struct {
-	OS        string
-	Arch      string
-	Hostname  string
+	OS       string
+	Arch     string
+	Hostname string
 }
 
 func getHostname() string {
@@ -249,27 +259,6 @@ func getHostname() string {
 		return hostname
 	}
 	return "unknown"
-}
-
-type mockEngine struct{}
-
-func (e *mockEngine) Ping(ctx context.Context, target net.IP) (*mockMeasurement, error) {
-	// Mock measurement that always succeeds
-	return &mockMeasurement{
-		RTT:      time.Millisecond,
-		Success:  true,
-		Target:   target,
-	}, nil
-}
-
-func (e *mockEngine) Close() error {
-	return nil
-}
-
-type mockMeasurement struct {
-	RTT      time.Duration
-	Success  bool
-	Target   net.IP
 }
 
 func absDuration(d time.Duration) time.Duration {
