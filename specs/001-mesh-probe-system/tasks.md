@@ -177,7 +177,7 @@ description: "Task list template for feature implementation"
 
 - [x] T062 [P] [US4] Web interface API contract tests in tests/contract/test_web_api.go
 - [x] T063 [P] [US4] WebSocket real-time communication tests in tests/contract/test_websocket.go
-- [x] T064 [P] [US4] React component integration tests in tests/web/components/
+- [x] T064 [P] [US4]React component integration tests in tests/web/components/
 - [x] T065 [US4] End-to-end web interface tests in tests/web/e2e/test_admin_interface.go
 - [x] T066 [US4] Cross-platform web interface deployment tests in tests/integration/test_web_deployment.go
 
@@ -205,7 +205,7 @@ description: "Task list template for feature implementation"
 
 **Integration and Deployment:**
 - [x] T083 [P] [US4] Configure multi-platform build for admin web service in Docker and native binaries
-- [x] T084 [P] [US4] Setup CI/CD pipeline for both Go backend and React frontend
+- [x] T084 [P] [US4]Setup CI/CD pipeline for both Go backend and React frontend
 - [x] T085 [P] [US4] Implement integration between web interface and existing CLI tools
 - [x] T086 [P] [US4] Add probe registration commands to CLI tools for web integration
 - [x] T087 [P] [US4] Create Kubernetes deployment manifests for admin web interface
@@ -231,19 +231,136 @@ description: "Task list template for feature implementation"
 
 ### Implementation Tasks
 
-- [ ] T093 [US3] Replace in-memory configuration storage in `internal/web/api/routes.go` with `config.Manager` integration for all `/config` endpoints, ensuring reads/writes go through the centralized providers (file/etcd/Consul) instead of local maps.
-- [ ] T094 [US3] Implement `GET /config/status` endpoint in `internal/web/api/routes.go` exposing `ManagerStatus` from `config.Manager` (provider health, update counts, last seen, health score) for operational visibility.
-- [ ] T095 [US3] Refactor `/probes` handlers in `internal/web/api/routes.go` to use `internal/monitoring/ProbeRegistry` instead of the local `probes` map, ensuring a single authoritative registry for probe identity, status, and metadata.
-- [ ] T096 [US3] Extend `internal/monitoring/probe_registry.go` to track applied configuration metadata per probe (e.g. `ConfigVersion`, `ConfigSource`, `ConfigAppliedAt`) and expose it via existing listing/get APIs.
-- [ ] T097 [US3] Add `/probes/:id/config-applied` endpoint in `internal/web/api/routes.go` that allows probes to report the configuration version/source they have successfully applied, updating `ProbeRegistry` accordingly for rollout tracking.
-- [ ] T098 [US3] Enhance `shouldAcceptConfiguration` in `internal/config/manager_impl.go` to use version-aware and provider-priority-aware rules (e.g. reject stale versions, prefer higher-priority providers) while remaining backward compatible.
-- [ ] T099 [US3] Add structured logging and metrics around configuration lifecycle in `internal/config/manager_impl.go` (initialization, provider failures, accepted/rejected updates, reloads) and expose propagation/health metrics via existing telemetry.
-- [ ] T100 [US3] Protect configuration management and probe control endpoints (`/config`, `/config/status`, `/config/propagate`, critical `/probes` operations) with existing auth middleware and role-based checks to prevent unauthorized central changes.
+- [x] T093 [US3] Replace in-memory configuration storage in `internal/web/api/routes.go` with `config.Manager` integration for all `/config` endpoints, ensuring reads/writes go through the centralized providers (file/etcd/Consul) instead of local maps.
+- [x] T094 [US3] Implement `GET /config/status` endpoint in `internal/web/api/routes.go` exposing `ManagerStatus` from `config.Manager` (provider health, update counts, last seen, health score) for operational visibility.
+- [x] T095 [US3] Refactor `/probes` handlers in `internal/web/api/routes.go` to use `internal/monitoring/ProbeRegistry` instead of the local `probes` map, ensuring a single authoritative registry for probe identity, status, and metadata.
+- [x] T096 [US3] Extend `internal/monitoring/probe_registry.go` to track applied configuration metadata per probe (e.g. `ConfigVersion`, `ConfigSource`, `ConfigAppliedAt`) and expose it via existing listing/get APIs.
+- [x] T097 [US3] Add `/probes/:id/config-applied` endpoint in `internal/web/api/routes.go` that allows probes to report the configuration version/source they have successfully applied, updating `ProbeRegistry` accordingly for rollout tracking.
+- [x] T098 [US3] Enhance `shouldAcceptConfiguration` in `internal/config/manager_impl.go` to use version-aware and provider-priority-aware rules (e.g. reject stale versions, prefer higher-priority providers) while remaining backward compatible.
+- [x] T099 [US3] Add structured logging and metrics around configuration lifecycle in `internal/config/manager_impl.go` (initialization, provider failures, accepted/rejected updates, reloads) and expose propagation/health metrics via existing telemetry.
+- [x] T100 [US3] Protect configuration management and probe control endpoints (`/config`, `/config/status`, `/config/propagate`, critical `/probes` operations) with existing auth middleware and role-based checks to prevent unauthorized central changes.
 - [ ] T101 [US3] Update or add tests in `tests/contract/` and `tests/integration/` to validate:
   - API now uses `config.Manager` and `ProbeRegistry`
   - configuration acceptance rules (version/priority)
   - probe-reported config version tracking
   - `/config/status` and security constraints on central operations.
+
+---
+
+## Phase 5.2: Admin Web Rework - Real Backend Integration for Phase 4/5.1
+
+**Goal**: Turn the existing admin web (React SPA + Go backend) from a demo UI into a production-aligned, API-driven interface using the real contracts from `internal/web/api/routes.go` and the updated implementation plan in `plan.md`.
+
+**Dependencies**:
+- Phase 3 (US1), Phase 4 (US2), Phase 5 (US3) foundational work completed
+- Phase 5.1 config/probe integration (T093–T100) in place
+- This phase refactors/extends User Story 4 (Admin Web Interface) to be fully functional
+
+### 5.2.1 Backend Contract Hardening (Admin Web API)
+
+- [ ] T200 [US4] Define `contracts/admin-web.openapi.yaml` reflecting actual handlers in `internal/web/api/routes.go`:
+  - `/auth/*`, `/config*`, `/probes*`, `/measurements*`, `/monitoring*`
+- [ ] T201 [US4] Sync `docs/API_ADMIN_WEB.md` with `admin-web.openapi.yaml` and `routes.go` to remove drift.
+- [ ] T202 [US4] Normalize JSON schemas to be UI-friendly:
+  - Document when responses are wrapped (`{ probes: [...] }`, `{ alerts: [...] }`) vs plain objects.
+  - Clarify snake_case vs camelCase expectations.
+- [ ] T203 [US4] Add structured logging for admin-web endpoints (auth, config, probes, monitoring) with correlation-friendly fields.
+- [ ] T204 [US4] Extend contract tests in `tests/contract/config_and_probe_admin_test.go`:
+  - Validate `/auth/login`, `/auth/me`, `/auth/refresh` response shapes.
+  - Validate `/config/status`, `/config/propagate`, `/probes/:id/config-applied` behavior.
+  - Ensure protected routes enforce auth/roles when middleware enabled.
+
+### 5.2.2 Frontend Types and API Alignment
+
+- [ ] T210 [US4] Update `web/src/types/index.ts` to match backend DTOs:
+  - Align `Probe` with `monitoring.Probe` (id, name, platform, arch, ipAddress, status, lastSeen, health, config metadata).
+  - Align `Alert` with `Alert` in `routes.go` (id, title, description, severity, source, status, created_at, resolved_at).
+  - Align `DashboardStats` with `DashboardStats` in `routes.go`.
+- [ ] T211 [US4] Refine auth-related types:
+  - Represent `/auth/login` response as `{ token: string; user: User; expiresAt: number }`.
+  - Remove or adjust `AuthToken`/`LoginResponse` definitions that don’t match backend.
+- [ ] T212 [US4] Update `web/src/services/api.ts` to:
+  - Use correct base paths (`/api/v1/...`) and exact route paths.
+  - Map wrapped responses (e.g. `{ probes: [...] }`) into typed returns.
+  - Normalize snake_case fields into camelCase in the client where needed.
+  - Centralize error transformation for consistent UI messaging.
+
+### 5.2.3 Authentication Flow & Route Guards
+
+- [ ] T220 [US4] Fix `apiService.login` in `web/src/services/api.ts`:
+  - Type response from `/auth/login` correctly; call `setAuthToken(token)` and persist user.
+- [ ] T221 [US4] Update `useAuth` in `web/src/hooks/useAuth.ts`:
+  - On mount, if `auth_token` exists, call `/auth/me` to validate.
+  - On 401 or network errors, clear auth state and storage.
+- [ ] T222 [US4] Adjust `App.tsx` routing:
+  - Add explicit `/login` route.
+  - Wrap protected routes (Dashboard, Targets, Config, etc.) in an auth guard.
+  - Show loading indicator until initial auth check completes (no unauthenticated flicker).
+
+### 5.2.4 Dashboard: Real Data & Probes Integration
+
+- [ ] T230 [US4] Wire `Dashboard.tsx` to real endpoints:
+  - Fetch `/monitoring/dashboard` for top-level stats (StatCards).
+  - Fetch `/monitoring/health/summary` for system status.
+- [ ] T231 [US4] Integrate `ProbesTable` with `/probes` and `/probes/:id/health`:
+  - Display actual probe list from `ProbeRegistry`.
+  - Show status (online/offline/degraded) and lastSeen.
+- [ ] T232 [US4] Back `LatencyChart` and `PacketLossChart` with `/measurements/statistics`:
+  - Use backend statistics where available; fall back gracefully if demo-only.
+- [ ] T233 [US4] Implement consistent loading/error states for all dashboard sections.
+
+### 5.2.5 Configuration Management UI
+
+- [ ] T240 [US3][US4] Implement configuration list & detail in `web/src/pages/NetworkConfiguration.tsx`:
+  - GET `/config` to show active configuration.
+  - GET `/config/status` to surface provider health and last reload.
+- [ ] T241 [US3][US4] Implement create/update operations:
+  - POST `/config`, PUT `/config/:id` with validation (JSON schema client-side if available).
+- [ ] T242 [US3][US4] Implement delete & propagate:
+  - DELETE `/config/:id`
+  - POST `/config/propagate` with user feedback.
+- [ ] T243 [US3][US4] Add clear banners/toasts for:
+  - Validation errors.
+  - Propagation success/failure (referencing `/config/status`).
+
+### 5.2.6 Probes & Rollout Visibility
+
+- [ ] T250 [US2][US3][US4] Extend probes UI (Targets / Probe views) to:
+  - Display configuration metadata per probe (version, source, appliedAt) using ProbeRegistry fields.
+- [ ] T251 [US3][US4] Visualize `/probes/:id/config-applied`:
+  - Show which probes have acknowledged a given configuration.
+  - Highlight probes with stale or missing configuration.
+- [ ] T252 [US4] Add manual “refresh” and auto-refresh interval (e.g., 10s) for probes listing using `/probes`.
+
+### 5.2.7 Real-time & WebSocket Strategy (Incremental)
+
+- [ ] T260 [US4] Mark current `web/src/services/websocket.ts` as experimental:
+  - Add feature flag or configuration to disable if backend WS not present.
+- [ ] T261 [US4] Implement safe fallback:
+  - Use periodic polling of `/monitoring/dashboard`, `/monitoring/alerts`, `/probes` when WS disabled.
+- [ ] T262 [US4] (Optional, if backend supports) Align WS client with `internal/web/websocket/service.go`:
+  - Subscribe to real probe/measurement events.
+  - Remove socket.io assumptions if incompatible.
+
+### 5.2.8 Tests & Observability for the Rework
+
+- [ ] T270 [US4][Test] Add frontend unit tests:
+  - `apiService` mapping tests for auth, config, probes, monitoring.
+  - `useAuth` tests for login, token persistence, `/auth/me` validation.
+  - Dashboard components verifying they render data from mocked API.
+- [ ] T271 [US4][Test] Add E2E scenario (e.g., Cypress/Playwright) under `tests/web/e2e/`:
+  - Login via UI → load dashboard → see real-time stats from running backend.
+- [ ] T272 [US4][Test] Extend `tests/contract/test_web_api.go`:
+  - Ensure responses remain compatible with admin-web contracts.
+- [ ] T273 [US4][Obs] Add backend logs/metrics:
+  - Count admin-web operations (logins, config changes, probe views).
+  - Export via existing telemetry for operational insight.
+
+**Checkpoint**: ✅ Phase 5.2 complete when:
+- Admin web frontend uses real backend APIs for auth, config, probes, dashboard.
+- Types and responses are contract-tested (backend + frontend).
+- Basic E2E flow (login → dashboard → config change) passes against a running stack.
+- WebSocket usage is either correctly integrated or safely disabled without breaking core flows.
 
 ---
 
@@ -341,7 +458,7 @@ Task: "Create Network Target model in pkg/types/target.go"
 With multiple developers:
 
 1. Team completes Setup + Constitutional Compliance + Foundational together
-2. Once Foundational is done:
+2. Once Foundation is done:
    - Developer A: User Story 1
    - Developer B: User Story 2  
    - Developer C: User Story 3

@@ -1,35 +1,74 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Layout from '@/components/Layout';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import Dashboard from '@/pages/Dashboard';
 import Login from '@/pages/Login';
-import { useAuth } from '@/hooks/useAuth';
 import Targets from '@/pages/Targets';
-import VisualConfigurator from '@/pages/VisualConfigurator';
 import NetworkConfiguration from '@/pages/NetworkConfiguration';
+import VisualConfigurator from '@/pages/VisualConfigurator';
 import OpenTelemetryConfiguration from '@/pages/OpenTelemetryConfiguration';
+import Layout from '@/components/Layout';
+import { useAuth } from '@/hooks/useAuth';
 
-const App: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
 
-  if (!isAuthenticated) {
-    return <Login />;
+  // While auth is being resolved, avoid flicker and do not redirect yet
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-200">
+        <div className="animate-pulse text-center">
+          <div className="text-xl font-semibold mb-2">Checking authentication...</div>
+          <div className="text-sm text-slate-400">Initializing admin web session</div>
+        </div>
+      </div>
+    );
   }
 
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+};
+
+export const App: React.FC = () => {
   return (
     <Router>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/targets" element={<Targets />} />
-          <Route path="/visual-configurator" element={<VisualConfigurator />} />
-          <Route path="/network-configuration" element={<NetworkConfiguration />} />
-          <Route path="/opentelemetry-configuration" element={<OpenTelemetryConfiguration />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Layout>
+      <Routes>
+        {/* Public login route */}
+        <Route path="/login" element={<Login />} />
+
+        {/* Protected application shell */}
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Outlet />
+              </Layout>
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Dashboard />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="targets" element={<Targets />} />
+          <Route path="config" element={<NetworkConfiguration />} />
+          <Route path="visual-configurator" element={<VisualConfigurator />} />
+          <Route path="otel-config" element={<OpenTelemetryConfiguration />} />
+        </Route>
+
+        {/* Fallback: any unknown route -> guarded dashboard */}
+        <Route
+          path="*"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Dashboard />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
     </Router>
   );
 };
-
-export default App;

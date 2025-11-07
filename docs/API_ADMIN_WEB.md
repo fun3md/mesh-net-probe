@@ -12,7 +12,7 @@ All examples assume JSON request/response unless stated otherwise.
 
 ## Authentication
 
-The API uses JWT-based authentication middleware.
+The API uses JWT-based authentication middleware (demo-grade in current implementation).
 
 - Protected endpoints require:
   - Authorization: Bearer &lt;token&gt;
@@ -34,7 +34,7 @@ Example (curl):
   -H "Content-Type: application/json" ^
   -d "{\"username\":\"admin\",\"password\":\"admin\"}"
 
-Successful response (example):
+Successful response (matches routes.go &amp; OpenAPI):
 
 - {
 -   "token": "demo-jwt-token-1730970000",
@@ -63,24 +63,58 @@ The following helpers are wired into routes:
 - auth.RequireAdmin() - allows only admin
 - auth.RequireOperator() - allows admin or operator
 
-Effective behavior (current):
+Effective behavior (current, see routes.go &amp; OpenAPI):
 
-- /auth/*: public for login; logout/me/refresh require JWT
-- /config (read): requires authenticated user (any valid role)
-- /config/status: requires authenticated user (any valid role)
-- /config (write/propagate): requires operator/admin as detailed below
+- /auth/*:
+  - POST /auth/login is public
+  - POST /auth/logout, GET /auth/me, POST /auth/refresh require JWT
+- /config:
+  - GET /config, GET /config/status require JWT (any valid role) in production wiring
+  - POST/PUT/DELETE /config*, POST /config/propagate require operator/admin roles
 - /probes:
-  - Read endpoints: require authenticated user
-  - Mutating endpoints: require operator/admin
-  - Heartbeat / config-applied: require JWT; intended for probe service accounts
+  - Read endpoints (GET /probes, GET /probes/:id, GET /probes/:id/health) require JWT
+  - Mutating endpoints (POST/PUT/DELETE) require operator/admin
+  - Heartbeat and config-applied are intended for authenticated probe/service tokens
 
 This RBAC model is preliminary and may change as real auth integration is completed.
+
+## Response Wrapping vs Plain Objects
+
+To align backend, contracts, and frontend:
+
+- Plain objects:
+  - Auth:
+    - POST /auth/login → { token, user, expiresAt }
+    - GET /auth/me → User
+    - POST /auth/refresh → { token, expiresAt }
+  - Configuration:
+    - GET /config → Configuration
+    - GET /config/status → ConfigStatus
+  - Probes:
+    - GET /probes/:id → Probe
+    - GET /probes/:id/health → { probe_id, health, status, last_seen }
+  - Monitoring:
+    - GET /monitoring/dashboard → DashboardStats (snake_case fields)
+    - GET /monitoring/health/summary → HealthSummary
+    - GET /monitoring/stats → MonitoringStats
+  - Alerts (single):
+    - POST /monitoring/alerts → Alert
+
+- Wrapped collections:
+  - GET /probes → { "probes": Probe[] }
+  - GET /measurements → { "measurements": MeasurementData[] }
+  - GET /monitoring/alerts → { "alerts": Alert[] }
+
+Frontend rules:
+- API client (`web/src/services/api.ts`) is responsible for:
+  - Reading wrapped lists (e.g. { probes: [...] }) and returning arrays.
+  - Mapping snake_case backend fields into camelCase view models where desired.
 
 ## Endpoints
 
 ### 1. Auth
 
-1. POST /auth/login (PRELIMINARY)
+1. POST /auth/login
 
 - Description:
   - Demo login endpoint; returns a JWT-like token for testing.
@@ -89,7 +123,8 @@ This RBAC model is preliminary and may change as real auth integration is comple
 - Request:
   - { "username": "admin", "password": "admin" }
 - Response:
-  - 200 with token and user info on success
+  - 200:
+    - { "token": string, "user": { "id": string, "username": string, "role": "admin" }, "expiresAt": number }
   - 401 on invalid credentials
 
 2. POST /auth/logout
@@ -99,14 +134,16 @@ This RBAC model is preliminary and may change as real auth integration is comple
 - Auth:
   - Requires JWT.
 - Response:
-  - 200 on success
+  - 200 { "message": "Logged out successfully" }
 
 3. GET /auth/me
 
 - Description:
-  - Returns demo current user info from JWT context.
+  - Returns demo current user info.
 - Auth:
   - Requires JWT.
+- Response:
+  - 200 User object (see OpenAPI contract)
 
 4. POST /auth/refresh
 
@@ -114,227 +151,105 @@ This RBAC model is preliminary and may change as real auth integration is comple
   - Returns a new demo token.
 - Auth:
   - Requires JWT.
-
-All auth endpoints are preliminary and not production-secure.
+- Response:
+  - 200 { "token": string, "expiresAt": number }
 
 ### 2. Configuration Management
 
-All configuration endpoints are now conceptually backed by config.Manager.
-The current implementation focuses on read/status exposure and controlled reload triggers.
-Direct writes are placeholders, as configuration is expected to be maintained via providers (file, etcd, Consul).
+All configuration endpoints are backed by config.Manager.
 
-1. GET /config
+- GET /config
+  - Returns the currently active configuration.
+  - 200: Configuration (plain object)
+  - 404: { "error": "configuration not available", "details": string }
 
-- Description:
-  - Returns the currently active configuration from config.Manager.
-- Auth:
-  - Requires JWT (any valid role).
-- Response:
-  - 200 with types.Configuration
-  - 404 if no configuration is available
+- GET /config/status
+  - Returns ManagerStatus: provider health, currentConfigID, lastUpdate, updateCount, healthScore.
+  - 200: ConfigStatus
+  - 500: { "error": "failed to get configuration status", "details": string }
 
-2. GET /config/status
+- POST /config (PRELIMINARY)
+  - Accepts a configuration payload (types.Configuration-compatible).
+  - Triggers Manager.ReloadConfiguration.
+  - 201: Configuration persisted in memory and reloaded successfully.
+  - 202: { "message": "configuration accepted; propagation reported issues", "config": Configuration, "warning": string }
 
-- Description:
-  - Returns ManagerStatus including:
-    - Sources: provider health and priority
-    - CurrentConfigID
-    - LastUpdate
-    - UpdateCount
-    - HealthScore
-- Auth:
-  - Requires JWT (any valid role).
-- Response:
-  - 200 with status
-  - 500 on internal errors
+- PUT /config/:id (PRELIMINARY)
+  - Updates configuration metadata and triggers reload.
+  - 200: Updated Configuration
+  - 400 / 500 on error
 
-3. POST /config (PRELIMINARY)
+- DELETE /config/:id (PRELIMINARY)
+  - Triggers reload after delete.
+  - 204 on success
 
-- Description:
-  - Accepts a configuration payload and attempts to trigger a reload via config.Manager.ReloadConfiguration.
-  - Intended as a façade over provider-backed configuration; not a direct persistent write.
-- Auth:
-  - Requires JWT + role: operator or admin.
-- Response:
-  - 201 / 202 on acceptance
-  - Includes information/warnings if reload fails
-
-4. PUT /config/:id (PRELIMINARY)
-
-- Description:
-  - Updates configuration metadata and triggers Manager.ReloadConfiguration.
-  - Implementation is a compatibility shim; backing stores remain authoritative.
-- Auth:
-  - Requires JWT + role: operator or admin.
-
-5. DELETE /config/:id (PRELIMINARY)
-
-- Description:
-  - Placeholder for deleting a configuration via providers and reloading.
-- Auth:
-  - Requires JWT + role: admin.
-
-6. POST /config/propagate
-
-- Description:
-  - Forces a reload from configured providers and returns updated /config/status.
-- Auth:
-  - Requires JWT + role: operator or admin.
-
-IMPORTANT:
-- All write-style configuration endpoints are PRELIMINARY.
-- For production, write through the configured providers (file/etcd/Consul); these endpoints will evolve into safe, auditable operations.
+- POST /config/propagate
+  - Forces reload from providers.
+  - 200: { "message": string, "status": ConfigStatus }
+  - 500 on failure
 
 ### 3. Probe Management
 
-Probe state is now backed by internal/monitoring.ProbeRegistry as the single authoritative registry.
+Backed by internal/monitoring.ProbeRegistry.
 
-1. GET /probes
+- GET /probes
+  - 200: { "probes": [Probe, ...] }
 
-- Description:
-  - List all registered probes.
-- Auth:
-  - Requires JWT.
-- Response:
-  - 200 { "probes": [ Probe ] }
+- GET /probes/:id
+  - 200: Probe
+  - 404: { "error": "probe not found" }
 
-2. GET /probes/:id
+- GET /probes/:id/health
+  - 200: { "probe_id": string, "health": object, "status": string, "last_seen": timestamp }
+  - 404: { "error": "probe or health status not found" }
 
-- Description:
-  - Get details for a specific probe.
-- Auth:
-  - Requires JWT.
+- POST /probes
+  - Request: Probe registration fields (id required, ip_address, platform, arch, etc.)
+  - 201: { "message": "probe registered successfully", "probe": Probe }
 
-3. GET /probes/:id/health
+- PUT /probes/:id
+  - Partial update.
+  - 200: Updated Probe
 
-- Description:
-  - Returns health information if available for a probe.
-- Auth:
-  - Requires JWT.
+- DELETE /probes/:id
+  - 204 on success
 
-4. POST /probes
+- POST /probes/:id/heartbeat
+  - Records heartbeat, updates last_seen.
+  - 200: { "message": "heartbeat received", "probe_id": string, "timestamp": timestamp }
 
-- Description:
-  - Register a new probe.
-- Auth:
-  - Requires JWT + role: operator or admin.
-- Request (example):
-  - {
-  -   "id": "probe-1",
-  -   "name": "edge-probe-1",
-  -   "version": "v1.0.0",
-  -   "platform": "linux",
-  -   "arch": "amd64",
-  -   "ip_address": "192.168.1.10",
-  -   "tags": ["edge","dc1"],
-  -   "metadata": {"env": "dev"}
-  - }
+- POST /probes/:id/config-applied
+  - Request:
+  -     - { "config_id": string, "config_version": number, "config_source": string, "applied_at"?: timestamp }
+  - 200: { "message": "configuration state recorded", "probe": Probe }
+  - 400 / 404 / 500 on error
 
-5. PUT /probes/:id
+### 4. Measurements and Monitoring
 
-- Description:
-  - Update probe metadata (name/version/platform/arch/ip/tags/metadata).
-- Auth:
-  - Requires JWT + role: operator or admin.
+Measurement and monitoring endpoints remain demo/preliminary:
 
-6. DELETE /probes/:id
+- GET /measurements → { "measurements": MeasurementData[] }
+- GET /measurements/:id → MeasurementData or 404
+- POST /measurements → MeasurementData (id/timestamp set by server)
+- GET /measurements/statistics → MeasurementStatsResponse
 
-- Description:
-  - Unregister a probe from the registry.
-- Auth:
-  - Requires JWT + role: admin.
+- GET /monitoring/dashboard → DashboardStats
+  - Fields: snake_case as in routes.go (total_probes, active_probes, etc.).
+- GET /monitoring/health/summary → HealthSummary
+- GET /monitoring/stats → MonitoringStats
+- POST /monitoring/alerts → Alert
+- GET /monitoring/alerts → { "alerts": Alert[] }
 
-7. POST /probes/:id/heartbeat
+## Contract Source of Truth
 
-- Description:
-  - Record a probe heartbeat; updates last_seen and status.
-- Auth:
-  - Requires JWT.
-- Intended usage:
-  - Probes or trusted agents call periodically with a service-token.
+- The canonical machine-readable contract is [`specs/001-mesh-probe-system/contracts/admin-web.openapi.yaml`](specs/001-mesh-probe-system/contracts/admin-web.openapi.yaml).
+- The handlers in [`internal/web/api/routes.go`](internal/web/api/routes.go) are the implementation reference.
+- Frontend types and api client in `web/src/types/index.ts` and `web/src/services/api.ts` must remain aligned with this contract.
 
-8. POST /probes/:id/config-applied
-
-- Description:
-  - Probes report which configuration they have successfully applied.
-  - Updates ProbeRegistry with:
-    - ConfigID, ConfigVersion, ConfigSource, ConfigAppliedAt
-- Auth:
-  - Requires JWT.
-- Request:
-  - {
-  -   "config_id": "central-config-v3",
-  -   "config_version": 3,
-  -   "config_source": "etcd",
-  -   "applied_at": "2025-11-07T08:55:00Z"
-  - }
-- Response:
-  - 200 on success with updated probe
-  - 404 if probe does not exist
-
-NOTE:
-- This endpoint is central for rollout tracking and is part of Phase 5.1 (T097).
-- Semantics are PRELIMINARY but aligned with the new registry fields.
-
-### 4. Measurements and Monitoring (Demo / Preliminary)
-
-The following endpoints still rely on in-memory/demo data structures and are not yet production-grade.
-
-- /measurements
-  - GET /measurements
-  - GET /measurements/:id
-  - POST /measurements
-  - GET /measurements/stream/:probe_id
-  - GET /measurements/statistics
-
-- /monitoring
-  - GET /monitoring/dashboard
-    - Uses ProbeRegistry counts plus demo metrics.
-  - GET /monitoring/health/summary
-    - Summarized health info (currently partly demo).
-  - GET /monitoring/stats
-    - Demo monitoring stats.
-  - POST /monitoring/alerts
-  - GET /monitoring/alerts
-
-All measurement and monitoring endpoints are PRELIMINARY and will be aligned with real telemetry, persistence, and auth in future phases.
-
-## Authentication Examples
-
-1. Login and use token (Windows cmd-style curl)
-
-- curl -X POST http://localhost:8080/api/auth/login ^
-  -H "Content-Type: application/json" ^
-  -d "{\"username\":\"admin\",\"password\":\"admin\"}"
-
-Copy the token from the response and use:
-
-- set TOKEN=demo-jwt-token-1730970000
-- curl http://localhost:8080/api/config ^
-  -H "Authorization: Bearer %TOKEN%"
-
-2. Protected write example (operator/admin)
-
-- curl -X POST http://localhost:8080/api/probes ^
-  -H "Authorization: Bearer %TOKEN%" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"id\":\"probe-1\",\"platform\":\"linux\",\"arch\":\"amd64\"}"
-
-3. Probe reporting applied configuration
-
-- curl -X POST http://localhost:8080/api/probes/probe-1/config-applied ^
-  -H "Authorization: Bearer %TOKEN%" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"config_id\":\"central-config-v3\",\"config_version\":3,\"config_source\":\"etcd\"}"
+Any future changes MUST:
+- Update routes.go, the OpenAPI file, this document, and the frontend types/API together to avoid drift.
 
 ## Notes
 
-- This documentation reflects current implementation, not the final design.
-- Endpoints marked PRELIMINARY may change:
-  - Request/response schemas
-  - Required roles
-  - Backing storage semantics
-- For production:
-  - Replace demo auth with real JWT signing and validation.
-  - Use config providers (file/etcd/Consul) as primary write path.
-  - Harden all monitoring/measurement endpoints with proper RBAC.
+- This documentation now reflects the aligned Phase 5.2.1 contract state.
+- Endpoints marked PRELIMINARY may still evolve in storage semantics and auth strength, but shapes and wrapping rules are stable for the current phase.

@@ -1,28 +1,149 @@
 import React from 'react';
+import { useEffect, useState } from 'react';
+import { apiService } from '@/services/api';
+
+interface LatencyPoint {
+  label: string;
+  value: number;
+}
+
+interface LatencyChartState {
+  points: LatencyPoint[];
+  loading: boolean;
+  error: string | null;
+}
 
 const LatencyChart: React.FC = () => {
+  const [state, setState] = useState<LatencyChartState>({
+    points: [],
+    loading: true,
+    error: null,
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadStats = async () => {
+      try {
+        const stats = await apiService.getMeasurementStatistics();
+        if (!isMounted) return;
+
+        const points: LatencyPoint[] = [
+          {
+            label: 'Avg',
+            value: parseFloat(
+              typeof stats.average_rtt === 'string'
+                ? stats.average_rtt
+                    .toLowerCase()
+                    .replace('ms', '')
+                    .trim()
+                : stats.average_rtt ?? 0
+            ) || 0,
+          },
+          {
+            label: 'Min',
+            value: parseFloat(
+              typeof stats.min_rtt === 'string'
+                ? stats.min_rtt
+                    .toLowerCase()
+                    .replace('ms', '')
+                    .trim()
+                : stats.min_rtt ?? 0
+            ) || 0,
+          },
+          {
+            label: 'Max',
+            value: parseFloat(
+              typeof stats.max_rtt === 'string'
+                ? stats.max_rtt
+                    .toLowerCase()
+                    .replace('ms', '')
+                    .trim()
+                : stats.max_rtt ?? 0
+            ) || 0,
+          },
+        ];
+
+        setState({
+          points,
+          loading: false,
+          error: null,
+        });
+      } catch (err: any) {
+        if (!isMounted) return;
+        const message =
+          err?.response?.data?.error ||
+          err?.message ||
+          'Failed to load latency statistics';
+        setState({
+          points: [],
+          loading: false,
+          error: message,
+        });
+      }
+    };
+
+    loadStats();
+    const interval = setInterval(loadStats, 15000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  if (state.loading) {
     return (
-        <div className="flex flex-col gap-2 rounded-xl border border-border-light dark:border-border-dark bg-panel-light dark:bg-panel-dark p-5">
-            <p className="text-base font-medium text-text-light-secondary dark:text-text-dark-secondary">Average System Latency (ms)</p>
-            <p className="text-text-light-primary dark:text-text-dark-primary tracking-tight text-3xl font-bold truncate">45.2ms</p>
-            <div className="flex gap-1">
-                <p className="text-text-light-secondary dark:text-text-dark-secondary text-sm">Last 24 Hours</p>
-                <p className="text-success text-sm font-medium">+2.1%</p>
-            </div>
-            <div className="flex min-h-[160px] flex-1 flex-col pt-4">
-                <svg fill="none" height="100%" preserveAspectRatio="none" viewBox="-3 0 478 150" width="100%" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M0 109C18.1538 109 18.1538 21 36.3077 21C54.4615 21 54.4615 41 72.6154 41C90.7692 41 90.7692 93 108.923 93C127.077 93 127.077 33 145.231 33C163.385 33 163.385 101 181.538 101C199.692 101 199.692 61 217.846 61C236 61 236 45 254.154 45C272.308 45 272.308 121 290.462 121C308.615 121 308.615 149 326.769 149C344.923 149 344.923 1 363.077 1C381.231 1 381.231 81 399.385 81C417.538 81 417.538 129 435.692 129C453.846 129 453.846 25 472 25V149H0V109Z" fill="url(#paint0_linear_chart1)"></path>
-                    <path d="M0 109C18.1538 109 18.1538 21 36.3077 21C54.4615 21 54.4615 41 72.6154 41C90.7692 41 90.7692 93 108.923 93C127.077 93 127.077 33 145.231 33C163.385 33 163.385 101 181.538 101C199.692 101 199.692 61 217.846 61C236 61 236 45 254.154 45C272.308 45 272.308 121 290.462 121C308.615 121 308.615 149 326.769 149C344.923 149 344.923 1 363.077 1C381.231 1 381.231 81 399.385 81C417.538 81 417.538 129 435.692 129C453.846 129 453.846 25 472 25" stroke="#135bec" strokeLinecap="round" strokeWidth="3"></path>
-                    <defs>
-                        <linearGradient gradientUnits="userSpaceOnUse" id="paint0_linear_chart1" x1="236" x2="236" y1="1" y2="149">
-                            <stop stopColor="#135bec" stopOpacity="0.3"></stop>
-                            <stop offset="1" stopColor="#135bec" stopOpacity="0"></stop>
-                        </linearGradient>
-                    </defs>
-                </svg>
-            </div>
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div className="text-xs text-slate-500 mb-2">
+          Latency (loading from /measurements/statistics)
         </div>
+        <div className="h-16 bg-slate-900 animate-pulse rounded" />
+      </div>
     );
+  }
+
+  if (state.error || !state.points.length) {
+    return (
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div className="text-xs text-slate-500 mb-1">
+          Latency
+        </div>
+        <div className="text-[10px] text-slate-500">
+          {state.error ||
+            'No latency statistics available yet. Run probes to populate measurements.'}
+        </div>
+      </div>
+    );
+  }
+
+  const maxValue = Math.max(...state.points.map(p => p.value), 1);
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+      <div className="text-xs text-slate-500 mb-2">
+        Latency (ms) from /measurements/statistics
+      </div>
+      <div className="flex items-end gap-3 h-24">
+        {state.points.map(point => (
+          <div key={point.label} className="flex-1 flex flex-col items-center">
+            <div
+              className="w-4 bg-emerald-500/80 rounded-t"
+              style={{
+                height: `${(point.value / maxValue) * 100}%`,
+              }}
+            />
+            <div className="text-[9px] text-slate-400 mt-1">
+              {point.label}
+            </div>
+            <div className="text-[8px] text-slate-500">
+              {point.value.toFixed(1)} ms
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 export default LatencyChart;

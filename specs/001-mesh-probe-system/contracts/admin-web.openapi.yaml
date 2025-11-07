@@ -1,0 +1,837 @@
+openapi: 3.0.3
+info:
+  title: Mesh Probe Admin Web API
+  version: 0.1.0
+  description: >
+    OpenAPI contract for the Mesh Probe Admin Web backend aligned with
+    internal/web/api/routes.go and API_ADMIN_WEB documentation.
+    Status: PRELIMINARY (Phase 5.2.1) - subject to change during hardening.
+
+servers:
+  - url: http://localhost:8080/api
+    description: Local development
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+          enum: [admin, operator, viewer]
+        email:
+          type: string
+          format: email
+        created:
+          type: string
+          format: date-time
+      required: [id, username, role]
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required: [username, password]
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+        expiresAt:
+          type: integer
+          description: Unix timestamp (seconds) when the token expires
+      required: [token, user, expiresAt]
+
+    RefreshResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: integer
+      required: [token, expiresAt]
+
+    Configuration:
+      type: object
+      description: >
+        Effective configuration object returned by config.Manager (types.Configuration).
+        Schema is intentionally generic; UI should treat it as opaque configuration content.
+      properties:
+        id:
+          type: string
+        version:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        data:
+          type: object
+          additionalProperties: true
+      required: [id, version]
+
+    ConfigStatus:
+      type: object
+      description: ManagerStatus as exposed by config.Manager.GetStatus.
+      properties:
+        currentConfigID:
+          type: string
+        lastUpdate:
+          type: string
+          format: date-time
+        updateCount:
+          type: integer
+        healthScore:
+          type: number
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              priority:
+                type: integer
+              healthy:
+                type: boolean
+              lastSeen:
+                type: string
+                format: date-time
+              error:
+                type: string
+
+    Probe:
+      type: object
+      description: Probe as exposed by monitoring.ProbeRegistry.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        platform:
+          type: string
+        arch:
+          type: string
+        ip_address:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+        lastSeen:
+          type: string
+          format: date-time
+        # Config metadata (Phase 5.1 T096/T097)
+        config_id:
+          type: string
+        config_version:
+          type: integer
+        config_source:
+          type: string
+        config_applied_at:
+          type: string
+          format: date-time
+
+    ProbeListResponse:
+      type: object
+      properties:
+        probes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Probe'
+      required: [probes]
+
+    ProbeRegisterRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        platform:
+          type: string
+        arch:
+          type: string
+        ip_address:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [id]
+
+    ProbeUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        platform:
+          type: string
+        arch:
+          type: string
+        ip_address:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ProbeConfigAppliedRequest:
+      type: object
+      properties:
+        config_id:
+          type: string
+        config_version:
+          type: integer
+        config_source:
+          type: string
+        applied_at:
+          type: string
+          format: date-time
+      required: [config_id]
+
+    ProbeHealthResponse:
+      type: object
+      properties:
+        probe_id:
+          type: string
+        status:
+          type: string
+        health:
+          type: object
+        last_seen:
+          type: string
+          format: date-time
+
+    MeasurementData:
+      type: object
+      properties:
+        id:
+          type: string
+        probeId:
+          type: string
+        target:
+          type: string
+        value:
+          type: number
+        unit:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    MeasurementListResponse:
+      type: object
+      properties:
+        measurements:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeasurementData'
+
+    MeasurementStatsResponse:
+      type: object
+      properties:
+        total_measurements:
+          type: integer
+        successful_measurements:
+          type: integer
+        failed_measurements:
+          type: integer
+        average_rtt:
+          type: string
+        min_rtt:
+          type: string
+        max_rtt:
+          type: string
+        packet_loss_rate:
+          type: number
+        targets_monitored:
+          type: integer
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        source:
+          type: string
+        status:
+          type: string
+          enum: [active, acknowledged, resolved]
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, title, description, severity, source, status, created_at]
+
+    AlertListResponse:
+      type: object
+      properties:
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+      required: [alerts]
+
+    DashboardStats:
+      type: object
+      properties:
+        total_probes:
+          type: integer
+        active_probes:
+          type: integer
+        total_measurements:
+          type: integer
+        active_targets:
+          type: integer
+        average_rtt:
+          type: number
+        packet_loss_rate:
+          type: number
+        health_score:
+          type: number
+        uptime:
+          type: number
+        alerts_count:
+          type: integer
+        last_updated:
+          type: string
+          format: date-time
+
+    HealthSummary:
+      type: object
+      properties:
+        overall_health:
+          type: string
+        system_status:
+          type: string
+        probes_healthy:
+          type: integer
+        probes_total:
+          type: integer
+        alerts_active:
+          type: integer
+        last_check:
+          type: string
+          format: date-time
+
+    MonitoringStats:
+      type: object
+      properties:
+        measurements_per_minute:
+          type: integer
+        data_processed_mb:
+          type: number
+        network_utilization:
+          type: number
+        cpu_utilization:
+          type: number
+        memory_utilization:
+          type: number
+        disk_utilization:
+          type: number
+        network_errors:
+          type: integer
+        processing_latency:
+          type: string
+
+paths:
+  /auth/login:
+    post:
+      summary: Demo login
+      description: Demo login endpoint; returns a JWT-like token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      summary: Demo logout
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logged out successfully
+
+  /auth/me:
+    get:
+      summary: Get current user (demo)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /auth/refresh:
+    post:
+      summary: Refresh auth token (demo)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: New token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+
+  /config:
+    get:
+      summary: Get active configuration
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Active configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Configuration'
+        '404':
+          description: No configuration available
+    post:
+      summary: Create/accept configuration (preliminary)
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Configuration created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Configuration'
+        '202':
+          description: Accepted with propagation warnings
+    # Note: Handler treats body as types.Configuration; schema intentionally generic.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Configuration'
+
+  /config/status:
+    get:
+      summary: Get configuration manager status
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Manager status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigStatus'
+        '500':
+          description: Failed to get configuration status
+
+  /config/{id}:
+    put:
+      summary: Update configuration metadata and reload (preliminary)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Configuration'
+      responses:
+        '200':
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Configuration'
+        '400':
+          description: Invalid request
+        '500':
+          description: Reload failed
+    delete:
+      summary: Delete configuration (preliminary)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Missing configuration id
+        '500':
+          description: Reload failed
+
+  /config/propagate:
+    post:
+      summary: Force configuration reload from providers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Reload triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  status:
+                    $ref: '#/components/schemas/ConfigStatus'
+        '500':
+          description: Failed to propagate configuration
+
+  /probes:
+    get:
+      summary: List probes
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Probe list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProbeListResponse'
+    post:
+      summary: Register new probe
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeRegisterRequest'
+      responses:
+        '201':
+          description: Probe registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  probe:
+                    $ref: '#/components/schemas/Probe'
+        '400':
+          description: Invalid probe registration format
+
+  /probes/{id}:
+    get:
+      summary: Get probe by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Probe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Probe'
+        '404':
+          description: Probe not found
+    put:
+      summary: Update probe metadata
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeUpdateRequest'
+      responses:
+        '200':
+          description: Updated probe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Probe'
+        '400':
+          description: Invalid format
+        '404':
+          description: Probe not found
+    delete:
+      summary: Unregister probe
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          description: Missing probe id
+
+  /probes/{id}/heartbeat:
+    post:
+      summary: Record probe heartbeat
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Heartbeat accepted
+        '400':
+          description: Missing probe id
+        '500':
+          description: Failed to update heartbeat
+
+  /probes/{id}/config-applied:
+    post:
+      summary: Record configuration applied by probe
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProbeConfigAppliedRequest'
+      responses:
+        '200':
+          description: Configuration state recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  probe:
+                    $ref: '#/components/schemas/Probe'
+        '400':
+          description: Invalid payload or missing config_id
+        '404':
+          description: Probe not found
+        '500':
+          description: Failed to update probe configuration state
+
+  /measurements:
+    get:
+      summary: List measurements (demo)
+      responses:
+        '200':
+          description: Measurements
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeasurementListResponse'
+    post:
+      summary: Create measurement (demo)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeasurementData'
+      responses:
+        '201':
+          description: Created measurement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeasurementData'
+
+  /measurements/{id}:
+    get:
+      summary: Get measurement by ID (demo)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Measurement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeasurementData'
+        '404':
+          description: Not found
+
+  /measurements/statistics:
+    get:
+      summary: Measurement statistics (demo)
+      responses:
+        '200':
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeasurementStatsResponse'
+
+  /monitoring/dashboard:
+    get:
+      summary: Dashboard statistics
+      responses:
+        '200':
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardStats'
+
+  /monitoring/health/summary:
+    get:
+      summary: Health summary
+      responses:
+        '200':
+          description: Health summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthSummary'
+
+  /monitoring/stats:
+    get:
+      summary: Monitoring statistics (demo)
+      responses:
+        '200':
+          description: Monitoring stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitoringStats'
+
+  /monitoring/alerts:
+    get:
+      summary: List alerts (demo)
+      responses:
+        '200':
+          description: Alerts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertListResponse'
+    post:
+      summary: Create alert (demo)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                severity:
+                  type: string
+                source:
+                  type: string
+              required: [title, description, severity, source]
+      responses:
+        '201':
+          description: Created alert
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'

@@ -1,304 +1,284 @@
-# Implementation Plan: Distributed Mesh Probe System
+# Implementation Plan: Admin Web System
 
-**Branch**: `001-mesh-probe-system` | **Date**: 2025-11-03 | **Spec**: specs/001-mesh-probe-system/spec.md
+**Branch**: `admin-web-functionality` | **Date**: January 2026 | **Spec**: https://github.com/example/admin-web-spec
 **Input**: Feature specification from `/specs/001-mesh-probe-system/spec.md`
 
 **Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
 
 ## Summary
 
-Build a distributed mesh probe system that collects high-resolution ICMP measurements with microsecond precision across Linux, macOS, and Windows on both x64 and ARM architectures. The system provides centralized configuration management with real-time web interface for administration and monitoring. The solution includes both CLI tools and a comprehensive admin web interface that exports all metrics and logs to OpenTelemetry Collector via OTLP protocol for comprehensive observability.
+Implement a production-ready Admin Web Interface (Phase 4/5.1) that uses the real Go backend as the single source of truth for:
+- Authentication (JWT-like demo flow)
+- Central configuration (config.Manager via /config, /config/status, /config/propagate)
+- Probe registry and health (ProbeRegistry via /probes, /probes/:id/health, /probes/:id/heartbeat, /probes/:id/config-applied)
+- Measurements and monitoring (/measurements*, /monitoring*)
 
-### System Components Overview
+This phase is part of the larger Distributed Mesh Probe System described in [`specs/001-mesh-probe-system/intialplan.md`](specs/001-mesh-probe-system/intialplan.md), which defines:
+- A cross-platform ICMP probe engine with microsecond-level precision.
+- Centralized configuration via etcd/Consul/file providers with sub-second propagation.
+- A probe registry and mesh coordination layer for high-frequency, distributed measurements.
+- OpenTelemetry-based telemetry export (metrics, logs, traces) for probes and admin web.
+- A unified CLI + Admin Web UX, sharing authentication, configuration, and monitoring semantics.
 
-1. **Core Probe CLI**: Command-line interface for individual probe operations (ping, traceroute)
-2. **Configuration Management**: Centralized etcd/Consul-based configuration with real-time updates
-3. **Admin Web Interface**: Web-based management dashboard for configuration and monitoring
-4. **Mesh Coordination**: Distributed probe coordination and measurement aggregation
-5. **Telemetry Export**: OpenTelemetry integration for comprehensive observability
-6. **Cross-Platform Support**: Native support for x86_64 and ARM64 architectures
+The goal of this plan is to:
+- Complete the Admin Web backend and SPA as a real, production-grade surface over the existing mesh probe capabilities.
+- Ensure all Admin Web contracts, flows, and UX remain fully aligned with the mesh probe system architecture and quality constraints from the initial plan.
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
-
-**Language/Version**: Go 1.21+ (for cross-platform compatibility and high performance), React 18 + TypeScript (for web interface)
-**Primary Dependencies**: ICMP library for Go, OpenTelemetry Go SDK, configuration management client library, WebSocket libraries, React UI framework
-**Storage**: Configuration management system (etcd/Consul) for centralized configuration, local buffer for measurement data during network outages, web interface state management
-**Testing**: Go test suite with cross-platform testing framework, performance benchmarking tools, React component testing, E2E testing for web interface
-**Target Platform**: Containerized deployment on Linux, macOS, Windows for both x64 and ARM64 architectures
-**Project Type**: multi (Go CLI application + React web interface + shared configuration)
-**Performance Goals**: Microsecond-level measurement precision, support 100+ concurrent probes, sub-second configuration propagation, sub-100ms web interface response times
-**Constraints**: ICMP requires elevated privileges, multi-platform consistency mandatory, OTLP export must be reliable, web interface must support real-time updates
-**Scale/Scope**: Support 100+ concurrent probe instances, handle high-frequency ICMP measurements without network degradation, manage multiple web interface clients simultaneously
+**Language/Version**: Go 1.21+ (backend, mesh probe services), TypeScript 5.x + React 18 + Vite (frontend)  
+**Primary Dependencies**: 
+- Backend: Gin, `config.Manager`, `monitoring.Manager`, `ProbeRegistry`, OpenTelemetry SDK, WebSocket/HTTP upgrades, platform detection utilities.
+- Frontend: axios, React Query or similar (optional), socket.io-client or native WebSocket client (for future phases), charting libs.
+**Storage**: 
+- Configuration: file/etcd/Consul providers via `config.Manager` per initial plan.
+- Telemetry: exported via OTLP/OpenTelemetry to external collectors (Prometheus, Jaeger, etc.) as described in initial plan.
+- Frontend: stateless; relies on backend APIs as source of truth.
+**Testing**: 
+- Go test suite (unit/integration/contract) for config, ICMP engine, mesh/monitoring, and admin-web APIs.
+- Frontend: Jest/Vitest + React Testing Library for web components; Cypress/Playwright for E2E.
+**Target Platform**: 
+- Backend and probes: Linux/macOS/Windows (x64/ARM64), containers.
+- Frontend: browser, served via admin-web or separate static host.
+**Project Type**: Multi-component system (Go CLI probes + admin-web backend + React SPA), with Admin Web as orchestration and observability layer.
+**Performance Goals**: 
+- Backend/admin-web: <50ms p95 for core config/probe operations; efficient aggregation endpoints for dashboards.
+- Probes: microsecond precision ICMP measurements; support 100+ concurrent probes without degradation.
+**Constraints**: 
+- Must respect constitution quality gates (linting, tests, security).
+- Real-time UX MUST NOT rely on demo-only in-memory state.
+- Auth initially demo-grade but aligned with unified security model; clear seam for real IdP.
+- Cross-platform behavior and telemetry guarantees inherited from the initial mesh probe plan.
+**Scale/Scope**: 
+- O(10^2) probes, O(10^3-10^4) measurements visible via UI.
+- Designed to integrate into the broader mesh coordination and telemetry architecture.
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
-
 ### Code Quality Excellence Requirements
-- [x] Go code follows strict quality standards with comprehensive error handling
-- [x] Clean architecture with separation of concerns implemented
-- [x] All public APIs and complex logic have comprehensive documentation
-- [x] golangci-lint configuration enforces consistent coding style
-- [x] Memory-safe practices prevent leaks and race conditions
+- [x] Go code follows strict quality standards with comprehensive error handling (routes.go already structured; extend with consistent error envelopes for web API).
+- [x] Clean architecture with separation of concerns implemented (handlers delegate to config.Manager, ProbeRegistry, monitoring.Manager, ICMP/mesh components where relevant).
+- [ ] All public APIs and complex logic have comprehensive documentation (sync docs/API_ADMIN_WEB.md and contracts with both initial mesh probe APIs and admin-web routes).
+- [x] golangci-lint configuration enforces consistent coding style.
+- [x] Memory-safe practices prevent leaks and race conditions.
 
 ### Testing Standards Compliance
-- [x] MANDATORY test coverage: 80% minimum for all packages
-- [x] Unit tests cover all business logic and utilities
-- [x] Integration tests validate network protocols and OS interactions
-- [x] Cross-platform testing plan includes Linux, macOS, Windows
-- [x] Performance benchmarks included for measurement accuracy and latency
-- [x] End-to-end tests simulate real operational scenarios
+- [ ] MANDATORY test coverage: 80% minimum for all packages (backend, probes, admin-web, and shared types).
+- [x] Unit tests cover core config/monitoring/ICMP components.
+- [x] Integration tests validate /config, /probes via Phase 5.1 tasks (config_and_probe_admin_test.go).
+- [ ] Cross-platform testing plan includes Linux, macOS, Windows (ensure admin-web integration tests exercise mesh probe flows).
+- [ ] Performance benchmarks included for measurement accuracy and latency (ICMP engine + selected admin-web endpoints).
+- [ ] End-to-end tests simulate real operational scenarios:
+      - CLI probes + admin-web + config propagation + telemetry export.
 
 ### User Experience Consistency Requirements
-- [x] CLI interface provides consistent command patterns and flag structures
-- [x] Text-based output supports both human-readable and JSON formats
-- [x] Configuration is intuitive with sensible defaults and clear validation
-- [x] Error messages are actionable with suggested resolutions
-- [x] Progress indicators and status reporting are informative yet non-verbose
+- [x] CLI interface consistency (unchanged; remains primary tool for direct probe operations).
+- [ ] Web UI mirrors backend/mesh semantics with clear, actionable errors and statuses.
+- [x] Configuration is intuitive with sensible defaults and validation at backend.
+- [ ] Error messages are actionable with suggested resolutions in frontend.
+- [ ] Progress indicators/reporting for async actions (propagate config, probe heartbeats, measurement streams).
+- [x] Text-based and JSON outputs from backend APIs remain stable for both CLI and web.
 
 ### Performance Requirements
-- [x] Measurement precision achieves domain-appropriate accuracy (microsecond-level for network measurement)
-- [x] Resource consumption optimized for long-running deployments
-- [x] Scalable architecture handles high-frequency operations without degradation
-- [x] Hot code paths optimized (zero-allocation where applicable)
-- [x] Memory footprint remains bounded regardless of operation duration
+- [x] Measurement precision and probe performance handled in backend ICMP/mesh engine.
+- [x] Resource consumption optimized for long-running probe deployments.
+- [ ] Frontend must avoid polling storms; prefer aggregated endpoints (/monitoring/dashboard, /monitoring/health/summary) and eventual WebSocket streams.
 
 ### Cross-Platform Compatibility
-- [x] Identical behavior maintained across target platforms (Linux, macOS, Windows)
-- [x] Platform-specific optimizations preserve functional equivalence
-- [x] Architecture support verified for target architectures (x64, ARM64)
-- [x] Platform detection and capability checking are automatic and transparent
+- [x] Identical behavior maintained across target platforms at backend and probes.
+- [x] Platform-specific optimizations preserve functional equivalence.
+- [x] Architecture support verified for target architectures (x64, ARM64).
+- [x] Platform detection/capability checking reused consistently (admin-web surfaces these states).
+
+> Gate Evaluation: Admin web Phase 4/5.1 work proceeds as a first-class surface over the distributed mesh probe system. Remaining NEEDS CLARIFICATION items must be resolved in research.md and contracts before finalizing E2E flows.
 
 ## Project Structure
 
-### Documentation (this feature)
+### Documentation (this feature within mesh probe system)
 
 ```text
 specs/001-mesh-probe-system/
-├── plan.md              # This file (/speckit.plan command output)
-├── research.md          # Phase 0 output (/speckit.plan command)
-├── data-model.md        # Phase 1 output (/speckit.plan command)
-├── quickstart.md        # Phase 1 output (/speckit.plan command)
-├── admin-web-interface.md # Admin web interface specification
-├── contracts/           # Phase 1 output (/speckit.plan command)
-└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
+├── plan.md                 # This integrated admin-web + mesh system plan
+├── intialplan.md           # Original distributed mesh probe system plan (authoritative system context)
+├── research.md
+├── data-model.md
+├── quickstart.md
+├── admin-web-interface.md
+├── contracts/
+└── tasks.md
 ```
 
 ### Source Code (repository root)
 
 ```text
-src/
+.
 ├── cmd/
-│   ├── probe/          # Main CLI application (ping, traceroute)
-│   └── admin-web/      # Admin web interface backend service
+│   ├── probe/               # Core Mesh Probe CLI (ICMP, traceroute, etc.)
+│   └── admin-web/           # Admin web backend service
 ├── internal/
-│   ├── config/         # Configuration management (etcd/Consul providers)
-│   ├── icmp/           # ICMP measurement engine
-│   ├── telemetry/      # OpenTelemetry integration
-│   ├── mesh/           # Mesh network coordination
-│   ├── platform/       # Cross-platform utilities
-│   ├── web/            # Web interface services (WebSocket, REST API)
-│   │   ├── websocket/  # Real-time WebSocket communication
-│   │   ├── api/        # REST API endpoints
-│   │   └── auth/       # Authentication and authorization
-│   └── monitoring/     # Probe registry and health monitoring
-├── web/                # React TypeScript frontend
+│   ├── icmp/                # ICMP measurement engine
+│   ├── config/              # Centralized configuration management
+│   ├── mesh/                # Mesh coordination and aggregation (planned/implemented per initial plan)
+│   ├── telemetry/           # OpenTelemetry integration
+│   ├── monitoring/          # Probe registry and health monitoring
+│   ├── platform/            # Cross-platform utilities
+│   ├── web/                 # Web interface services (REST, WebSocket, auth)
+│   │   ├── api/
+│   │   ├── auth/
+│   │   └── websocket/
+├── pkg/
+│   └── types/               # Shared data types and contracts
+├── web/                     # React TypeScript SPA for admin interface
 │   ├── src/
-│   │   ├── components/ # Reusable React components
-│   │   ├── pages/      # Main application pages
-│   │   ├── hooks/      # Custom React hooks
-│   │   ├── services/   # API and WebSocket clients
-│   │   └── types/      # TypeScript type definitions
-│   ├── public/         # Static assets
-│   └── package.json    # Frontend dependencies
-└── pkg/
-    └── types/          # Shared data types and contracts
-tests/
-├── unit/               # Unit tests (Go + React)
-├── integration/        # Cross-platform integration tests
-├── performance/        # Benchmark tests
-├── contract/           # API contract tests
-├── web/                # Web interface tests (Jest, Cypress)
-│   ├── components/     # React component tests
-│   ├── e2e/            # End-to-end tests
-│   └── api/            # API integration tests
-└── load/               # Load testing for web interface
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── services/
+│   │   ├── hooks/
+│   │   └── types/
+└── tests/
+    ├── unit/
+    ├── integration/
+    ├── contract/
+    ├── performance/
+    ├── security/
+    └── web/                 # To include admin web contracts/E2E tests
 ```
 
-**Structure Decision**: Multi-component system with separate Go CLI application, web interface backend, and React frontend. Clean separation between probe operations (cmd/probe), web management services (cmd/admin-web, internal/web), and configuration management. Testing covers both Go backend and React frontend with comprehensive cross-platform validation.
+**Structure Decision**: Single repository containing:
+- Core probe CLI and mesh/ICMP/telemetry components (from initial plan).
+- Admin-web backend exposing configuration, probe registry, monitoring, and measurements.
+- React SPA as thin client over these APIs.
+This plan builds on and does not supersede the system-level requirements from [`intialplan.md`](specs/001-mesh-probe-system/intialplan.md).
 
-## Admin Web Interface Integration
+## Phase 4 / 5.1: Admin Web Backend + Frontend Real Functionality Plan
 
-### Integration Architecture
+### 1. Backend: Solidify Admin Web API Contracts
 
-The admin web interface integrates seamlessly with the existing mesh probe toolset through the following mechanisms:
+Use internal/web/api/routes.go as the authoritative contract and close gaps between types and responses:
 
-#### 1. **Configuration Provider Integration**
-- **etcd Provider**: Web interface directly manages configurations in the same etcd cluster used by CLI probes
-- **Real-time Sync**: Changes made through web interface are immediately available to CLI tools
-- **Version Control**: Configuration versions tracked for both web and CLI access
-- **Validation**: Same validation logic used by both web interface and CLI tools
+1. Auth:
+   - POST /auth/login → { token: string, user: { id, username, role }, expiresAt } (already implemented).
+   - GET /auth/me → returns current user (demo static; treat as admin).
+   - POST /auth/refresh → returns { token, expiresAt }.
+   - Action: Document these shapes in contracts/auth.openapi.yaml and update frontend types accordingly.
 
-#### 2. **Probe Registry Integration**
-- **Self-Registration**: CLI probes register with the admin web interface via API endpoints
-- **Health Reporting**: Probes send periodic health status updates to the web interface
-- **Measurement Streaming**: Real-time measurement data streamed from probes to web dashboard
-- **Configuration Distribution**: Web interface pushes configurations to registered probes
+2. Config:
+   - GET /config → current effective configuration (types.Configuration).
+   - GET /config/status → manager status (provider health, last reload).
+   - POST /config, PUT /config/:id, DELETE /config/:id, POST /config/propagate → drive configManager.ReloadConfiguration.
+   - Action: Model these as admin-only operations in OpenAPI and ensure handlers consistently return JSON with error/message fields for UI.
 
-#### 3. **Unified Authentication**
-```yaml
-authentication_flow:
-  web_interface:
-    - User authenticates via web interface
-    - JWT token issued for API access
-    - Token used for probe registration and configuration access
-  
-  cli_integration:
-    - CLI probes use same authentication endpoints
-    - Service accounts for probe-to-web communication
-    - Token-based configuration access
-    - Consistent permission model across web and CLI
-```
+3. Probes:
+   - GET /probes → { probes: Probe[] } mapped from monitoring.ProbeRegistry.
+   - GET /probes/:id, DELETE /probes/:id, etc.
+   - POST /probes/:id/heartbeat, POST /probes/:id/config-applied → used by probes for status/rollout tracking.
+   - Action: Define normalized probe DTO in contracts to match web/src/types.Probe (align field names: ipAddress vs IPAddress, lastSeen, status, health).
 
-#### 4. **Tool Integration Examples**
+4. Measurements:
+   - /measurements, /measurements/:id, /measurements/statistics, /measurements/stream/:probe_id.
+   - Currently demo/in-memory; Phase 4+ treats them as optional but exposes consistent schema for UI charts.
 
-**CLI Tool Integration**:
-```bash
-# Existing CLI tools continue to work unchanged
-./probe ping 8.8.8.8
-./probe traceroute 8.8.8.8
+5. Monitoring:
+   - GET /monitoring/dashboard → DashboardStats.
+   - GET /monitoring/health/summary → health overview.
+   - GET/POST /monitoring/alerts → Alert list/create.
 
-# New admin commands for web interface integration
-./probe register --web-endpoint=http://admin-web:8080
-./probe sync-config --from-web
-./probe report-health --to-web
-```
+Deliverables:
+- contracts/admin-web.openapi.yaml aligned with routes.go semantics.
+- docs/API_ADMIN_WEB.md updated to exactly match handlers.
 
-**Web Interface Workflow**:
-1. **Configuration Creation**: User creates configuration in web interface
-2. **Probe Registration**: Probes automatically discover and register with web interface
-3. **Configuration Deployment**: Web interface pushes configuration to registered probes
-4. **Real-time Monitoring**: Web interface displays live probe status and measurements
-5. **Alert Management**: Web interface receives and displays alerts from CLI tools
+### 2. Frontend: Refactor to Real API-Driven Flows
 
-#### 5. **Cross-Platform Deployment**
+Key problems today:
+- useAuth.ts assumes /auth/me returns a user bound to stored token, but login currently stores token and user from response without verifying persistence semantics.
+- api.ts types (AuthToken, LoginResponse, DashboardStats, Alert etc.) do not perfectly match backend responses.
+- Dashboard and other pages use mostly static/demo components; they are not wired to apiService.
 
-**Containerized Deployment**:
-```yaml
-services:
-  probe-cli:
-    image: mesh-probe/cli:latest
-    command: ["probe", "ping", "8.8.8.8"]
-    
-  admin-web:
-    image: mesh-probe/admin-web:latest
-    ports:
-      - "8080:8080"  # HTTP API
-      - "8081:8081"  # WebSocket
-    
-  etcd:
-    image: etcd:latest
-    # Central configuration store
-```
+Plan:
 
-**Native Binary Deployment**:
-```bash
-# Cross-platform builds for admin web interface
-GOOS=linux GOARCH=amd64 go build -o admin-web-amd64 ./cmd/admin-web/
-GOOS=linux GOARCH=arm64 go build -o admin-web-arm64 ./cmd/admin-web/
-GOOS=windows GOARCH=amd64 go build -o admin-web-amd64.exe ./cmd/admin-web/
+1. Auth wiring:
+   - Update apiService.login to type its response: { token: string; user: { ... }; expiresAt: number } to match handleLogin.
+   - Ensure apiService.setAuthToken stores raw token and sets Authorization: Bearer <token>.
+   - Update useAuth.ts to:
+     - On mount, read auth_token and attempt GET /auth/me.
+     - Handle 401 by clearing auth state.
+     - Expose loading state; App.tsx should render a loading screen until auth state resolved, then gate routes.
 
-# Same builds for CLI tools (already implemented)
-GOOS=linux GOARCH=amd64 go build -o probe-amd64 ./cmd/probe/
-GOOS=linux GOARCH=arm64 go build -o probe-arm64 ./cmd/probe/
-```
+2. Routing and guards:
+   - Keep App.tsx router structure, but:
+     - Add explicit /login route.
+     - Show Login page when !isAuthenticated (instead of replacing whole app without Router).
+     - Optionally use a ProtectedRoute wrapper to centralize guard logic.
 
-### Data Flow Integration
+3. Dashboard page wiring:
+   - Replace static placeholders in Dashboard.tsx with real calls:
+     - useEffect to call apiService.getDashboardStats and apiService.getHealthSummary.
+     - Pass data into StatCards, ProbesTable, LatencyChart, PacketLossChart.
+   - Add error/loading states consistent with Constitution UX requirements.
 
-#### Configuration Management Flow:
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Interface │    │   etcd/Consul   │    │   CLI Probes    │
-│                 │    │                 │    │                 │
-│ 1. Create Config│◄──►│ 2. Store Config │◄──►│ 3. Load Config  │
-│                 │    │                 │    │                 │
-│ 4. Update Config│◄──►│ 5. Version Ctrl │◄──►│ 6. Apply Config │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+4. Probes and Config pages:
+   - Targets.tsx / NetworkConfiguration.tsx / VisualConfigurator.tsx / OpenTelemetryConfiguration.tsx:
+     - Implement CRUD flows using apiService:
+       - Config list/create/update/delete → /config*, plus /config/propagate.
+       - Probe list/details → /probes, /probes/:id, /probes/:id/health.
+     - Add optimistic UI or clear status messages.
 
-#### Real-time Monitoring Flow:
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   CLI Probes    │    │ Admin Web       │    │ Web Dashboard   │
-│                 │    │ Backend         │    │                 │
-│ 1. Collect Data │───►│ 2. Aggregate    │───►│ 3. Display      │
-│                 │    │                 │    │                 │
-│ 4. Health Check │───►│ 5. WebSocket    │───►│ 6. Real-time UI │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+5. WebSocket / real-time:
+   - web/src/services/websocket.ts currently assumes socket.io server; backend exposes HTTP/WebSocket endpoints differently (NEEDS CLARIFICATION).
+   - Interim Phase 4 plan:
+     - Use polling for /monitoring/dashboard and /monitoring/alerts (e.g., 5-10s interval).
+     - Gate WebSocketService behind feature flag and update once internal/web/websocket/service.go is aligned (Phase 5+).
+   - Mark current socket.io usage as experimental; do not make it a hard dependency for core flows.
 
-### API Integration
+### 3. Alignment Tasks (Backend + Frontend)
 
-#### Shared API Endpoints:
-```go
-// Configuration management (shared by web interface and CLI tools)
-type ConfigAPI interface {
-    GetConfig(ctx context.Context, id string) (*types.Configuration, error)
-    CreateConfig(ctx context.Context, config *types.Configuration) error
-    UpdateConfig(ctx context.Context, id string, config *types.Configuration) error
-    DeployConfig(ctx context.Context, id string, targetProbes []string) error
-}
+Define concrete refactor tasks (to be mirrored into tasks.md):
 
-// Probe registry (used by web interface for monitoring)
-type ProbeRegistryAPI interface {
-    RegisterProbe(ctx context.Context, probe *ProbeRegistration) error
-    ReportHealth(ctx context.Context, probeID string, health *ProbeHealth) error
-    StreamMeasurements(ctx context.Context, probeID string) (<-chan *Measurement, error)
-}
-```
+- Align types:
+  - Update web/src/types/index.ts to match backend responses for:
+    - Probe (fields from monitoring.Probe).
+    - Alert (fields from Alert in routes.go).
+    - DashboardStats (fields from DashboardStats in routes.go).
+  - Where backend uses snake_case, normalize via apiService mapping.
 
-### Security Integration
+- Align apiService methods:
+  - Ensure paths and shapes match internal/web/api/routes.go handlers exactly.
+  - Add wrapper methods for:
+    - getDashboardStats(), getHealthSummary(), getMonitoringStats(), getAlerts(), createAlert().
+    - getConfigStatus(), propagateCurrentConfig(), etc.
+  - Implement consistent error handling/logging for debugging.
 
-#### Unified Security Model:
-- **Consistent Authentication**: Same JWT tokens work for web interface and CLI tools
-- **Role-Based Access**: Admin, operator, viewer roles apply to both interfaces
-- **Audit Logging**: All configuration changes logged regardless of source
-- **Network Security**: TLS encryption for all inter-component communication
+- App initialization:
+  - On app start: auth check → fetch basic health/dashboard data.
 
-### Monitoring and Observability Integration
+### 4. Tests and Observability Hooks
 
-#### Unified Telemetry:
-```yaml
-telemetry_pipeline:
-  sources:
-    - cli_probes: "ICMP measurements, health status"
-    - web_interface: "User actions, API calls"
-    - admin_backend: "System metrics, WebSocket events"
-  
-  processing:
-    - open_telemetry: "Unified metrics and traces"
-    - alerts: "Cross-component alerting"
-    - dashboards: "Unified visualization"
-  
-  export:
-    - prometheus: "Metrics collection"
-    - jaeger: "Distributed tracing"
-    - elasticsearch: "Log aggregation"
-```
+- Backend:
+  - Extend tests/contract/config_and_probe_admin_test.go to:
+    - Assert /auth/login + /auth/me flow shape.
+    - Assert /config/status and /probes/:id/config-applied behavior.
+  - Add tests/security cases ensuring auth middleware enforced on admin routes.
 
-This integration ensures the admin web interface becomes a natural extension of the existing toolset while providing powerful management capabilities for complex deployments.
+- Frontend:
+  - Add lightweight contract tests (TypeScript) to validate that:
+    - apiService response mappers align with OpenAPI schemas.
+    - useAuth handles token lifecycle correctly.
 
-## Complexity Tracking
+- E2E (Phase 4 gate):
+  - Scenario: login via UI → load dashboard from real backend → list probes from ProbeRegistry → show health summary.
+  - Scenario: create/update configuration via UI → POST/PUT /config → trigger /config/propagate → verify status is surfaced in UI.
 
-> **Fill ONLY if Constitution Check has violations that must be justified**
+- Observability:
+  - Add logging in backend handlers around auth, config, probes to aid debugging.
+  - In frontend, centralize API error logging with correlation IDs (if available in responses).
 
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+## Gate Re-evaluation (Post-Plan)
+
+Once:
+- contracts/admin-web.openapi.yaml is defined,
+- apiService and types are aligned,
+- Dashboard/Config/Probes pages are wired to these endpoints,
+- and basic E2E is in place,
+
+then:
+- Constitutional gates for UX, testing, and cross-platform for Phase 4/5.1 are satisfied for the admin web surface.
